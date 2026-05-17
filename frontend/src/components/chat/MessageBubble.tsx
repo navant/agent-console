@@ -1,0 +1,58 @@
+import React from 'react';
+import { ChatMessage } from '../../types';
+
+interface MessageBubbleProps {
+  msg: ChatMessage;
+}
+
+export default function MessageBubble({ msg }: MessageBubbleProps) {
+  if (msg.type === 'system') {
+    return (
+      <div className="msg msg-system">
+        <span className="msg-tag">SYS</span>
+        <span className="mono">{msg.text}</span>
+      </div>
+    );
+  }
+
+  if (msg.type === 'text') {
+    return (
+      <div className="msg msg-text">
+        <span className="msg-tag">OUT</span>
+        <div className="msg-body">{msg.text}</div>
+      </div>
+    );
+  }
+
+  if (msg.type === 'tool_use') {
+    const inputStr = typeof msg.input === 'string'
+      ? msg.input
+      : JSON.stringify(msg.input, null, 2);
+    return (
+      <div className="msg msg-tool">
+        <span className="msg-tag tag-tool">{msg.tool}</span>
+        <code className="mono">{inputStr}</code>
+      </div>
+    );
+  }
+
+  if (msg.type === 'tool_result') {
+    return (
+      <div className="msg msg-result">
+        <span className="msg-tag tag-result">↳</span>
+        <pre className="mono">{msg.text}</pre>
+      </div>
+    );
+  }
+
+  if (msg.type === 'user') {
+    return (
+      <div className="msg msg-user">
+        <span className="msg-tag tag-user">YOU</span>
+        <div className="msg-body">{msg.text}</div>
+      </div>
+    );
+  }
+
+  return null;
+}

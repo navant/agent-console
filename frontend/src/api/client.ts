@@ -1,4 +1,17 @@
-import { AgentConfig, WorkspaceConfig, TaskConfig, SkillConfig, WSServerMessage } from '../types';
+import {
+  AgentConfig,
+  AppConfig,
+  MemoryState,
+  MemoryFileEntry,
+  PlanConfig,
+  SkillConfig,
+  TaskConfig,
+  WorkflowConfig,
+  WorkspaceConfig,
+  WorkspacesResponse,
+  CreateWorkspaceResponse,
+  WSServerMessage,
+} from '../types';
 
 const BASE = '/api';
 
@@ -15,33 +28,103 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ─── Config ───────────────────────────────────────────────────────────────────
+export const getConfig = () => request<AppConfig>('/config');
+export const switchWorkspace = (workspaceId: string) =>
+  request<{ activeWorkspace: string; workspace: WorkspaceConfig }>('/config/workspace', {
+    method: 'POST',
+    body: JSON.stringify({ workspaceId }),
+  });
+
 // ─── Agents ───────────────────────────────────────────────────────────────────
 export const getAgents = () => request<AgentConfig[]>('/agents');
-export const createAgent = (data: Partial<AgentConfig>) =>
+export const createAgent = (data: Partial<AgentConfig> & { source?: 'global' | 'workspace' }) =>
   request<AgentConfig>('/agents', { method: 'POST', body: JSON.stringify(data) });
 export const updateAgent = (id: string, data: Partial<AgentConfig>) =>
   request<AgentConfig>(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-export const deleteAgent = (id: string) =>
+export const deleteAgentApi = (id: string) =>
   request<void>(`/agents/${id}`, { method: 'DELETE' });
 
 // ─── Workspaces ───────────────────────────────────────────────────────────────
-export const getWorkspaces = () => request<WorkspaceConfig[]>('/workspaces');
+export const getWorkspaces = () => request<WorkspacesResponse>('/workspaces');
 export const createWorkspace = (data: Partial<WorkspaceConfig>) =>
-  request<WorkspaceConfig>('/workspaces', { method: 'POST', body: JSON.stringify(data) });
+  request<CreateWorkspaceResponse>('/workspaces', { method: 'POST', body: JSON.stringify(data) });
+export const activateWorkspace = (id: string) =>
+  request<WorkspaceConfig>(`/workspaces/${id}/activate`, { method: 'POST' });
 export const deleteWorkspace = (id: string) =>
   request<void>(`/workspaces/${id}`, { method: 'DELETE' });
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 export const getTasks = () => request<TaskConfig[]>('/tasks');
-export const createTask = (data: Partial<TaskConfig>) =>
-  request<TaskConfig>('/tasks', { method: 'POST', body: JSON.stringify(data) });
-export const updateTask = (id: string, data: Partial<TaskConfig>) =>
+export const createTask = (data: {
+  title: string;
+  agent?: string;
+  workflow: string;
+  skills?: string[];
+  description?: string;
+}) => request<TaskConfig>('/tasks', { method: 'POST', body: JSON.stringify(data) });
+export const updateTask = (id: string, data: Partial<TaskConfig> & { description?: string }) =>
   request<TaskConfig>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteTask = (id: string) =>
   request<void>(`/tasks/${id}`, { method: 'DELETE' });
 
+export const getTaskPlan = (id: string) => request<PlanConfig>(`/tasks/${id}/plan`);
+export const saveTaskPlan = (id: string, plan: PlanConfig) =>
+  request<PlanConfig>(`/tasks/${id}/plan`, { method: 'PUT', body: JSON.stringify(plan) });
+export const generateTaskPlan = (id: string, description?: string) =>
+  request<PlanConfig>(`/tasks/${id}/plan/generate`, {
+    method: 'POST',
+    body: JSON.stringify({ description }),
+  });
+export const getTaskProgress = (id: string) =>
+  request<{ content: string }>(`/tasks/${id}/progress`);
+export const confirmTask = (id: string) =>
+  request<TaskConfig>(`/tasks/${id}/confirm`, { method: 'POST' });
+export const rejectTask = (id: string) =>
+  request<TaskConfig>(`/tasks/${id}/reject`, { method: 'POST' });
+
 // ─── Skills ───────────────────────────────────────────────────────────────────
 export const getSkills = () => request<SkillConfig[]>('/skills');
+
+// ─── Workflows ────────────────────────────────────────────────────────────────
+export const getWorkflows = () => request<WorkflowConfig[]>('/workflows');
+export const createWorkflow = (data: Partial<WorkflowConfig>) =>
+  request<WorkflowConfig>('/workflows', { method: 'POST', body: JSON.stringify(data) });
+export const updateWorkflow = (id: string, data: Partial<WorkflowConfig>) =>
+  request<WorkflowConfig>(`/workflows/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteWorkflow = (id: string) =>
+  request<void>(`/workflows/${id}`, { method: 'DELETE' });
+
+// ─── Browse ───────────────────────────────────────────────────────────────────
+export interface BrowseResult {
+  path: string;
+  parent: string;
+  entries: { name: string; path: string }[];
+}
+
+export const browseDirectory = (path = '~') =>
+  request<BrowseResult>(`/browse?path=${encodeURIComponent(path)}`);
+
+// ─── Memory ───────────────────────────────────────────────────────────────────
+export const getMemory = () => request<MemoryState>('/memory');
+export const saveWorkspaceMemory = (content: string) =>
+  request<MemoryState>('/memory/workspace', { method: 'PUT', body: JSON.stringify({ content }) });
+export const saveAgentMemory = (agentId: string, content: string) =>
+  request<MemoryState>(`/memory/agent/${agentId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+export const getMemoryFiles = () =>
+  request<{ files: MemoryFileEntry[] }>('/memory/files');
+export const getMemoryFile = (path: string, agentId?: string) =>
+  request<{ path: string; content: string }>(
+    `/memory/file?path=${encodeURIComponent(path)}${agentId ? `&agentId=${encodeURIComponent(agentId)}` : ''}`
+  );
+export const saveMemoryFile = (path: string, content: string, agentId?: string) =>
+  request<MemoryState>('/memory/file', {
+    method: 'PUT',
+    body: JSON.stringify({ path, content, agentId }),
+  });
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 export interface SessionSummary {
@@ -125,7 +208,7 @@ export class WebSocketManager {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     } else {
-      console.warn('[ws] not connected, queuing message is not supported');
+      console.warn('[ws] not connected');
     }
   }
 

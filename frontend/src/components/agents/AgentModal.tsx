@@ -28,6 +28,7 @@ export default function AgentModal({ open, onClose }: AgentModalProps) {
   const [soul, setSoul] = useState(DEFAULT_SOUL);
   const [tools, setTools] = useState(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep']);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [source, setSource] = useState<'global' | 'workspace'>('global');
   const [memory, setMemory] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -36,7 +37,7 @@ export default function AgentModal({ open, onClose }: AgentModalProps) {
   const reset = () => {
     setName(''); setTint(SWATCHES[0]); setModel('claude-sonnet-4-5');
     setSoul(DEFAULT_SOUL); setTools(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep']);
-    setSelectedSkills([]); setMemory(true);
+    setSelectedSkills([]); setMemory(true); setSource('global');
   };
 
   useEffect(() => { if (open) reset(); }, [open]);
@@ -61,7 +62,7 @@ export default function AgentModal({ open, onClose }: AgentModalProps) {
     try {
       const agent = await createAgent({
         id: slug, name: slug, tint, model, soul, tools,
-        skills: selectedSkills, memory,
+        memory, source,
       });
       addAgent(agent);
       onClose();
@@ -220,6 +221,23 @@ export default function AgentModal({ open, onClose }: AgentModalProps) {
               </div>
             )}
 
+            {/* Source */}
+            <div className="field">
+              <label className="field-lbl"><span>Location</span></label>
+              <div className="seg">
+                {(['global', 'workspace'] as const).map(opt => (
+                  <button
+                    key={opt}
+                    type="button"
+                    className={'seg-opt' + (source === opt ? ' is-on' : '')}
+                    onClick={() => setSource(opt)}
+                  >
+                    <span>{opt === 'global' ? 'Global (~/.claude)' : 'Workspace'}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Memory */}
             <div className="field">
               <label className="field-lbl">
@@ -245,7 +263,7 @@ export default function AgentModal({ open, onClose }: AgentModalProps) {
         <footer className="modal-ft">
           <div className="modal-ft-meta">
             Will write to{' '}
-            <span className="mono">~/.agent-control-panel/agents/{slug || '<name>'}/ </span>
+            <span className="mono">~/.claude/agents/{slug || '<name>'}.md</span>
           </div>
           <div className="modal-ft-actions">
             <button className="btn" onClick={onClose}>Cancel</button>

@@ -3,9 +3,12 @@ import { ChatMessage } from '../../types';
 
 interface MessageBubbleProps {
   msg: ChatMessage;
+  agentColor?: string;
 }
 
-export default function MessageBubble({ msg }: MessageBubbleProps) {
+const CLAUDE_ORANGE = '#e07b39';
+
+export default function MessageBubble({ msg, agentColor }: MessageBubbleProps) {
   if (msg.type === 'system') {
     return (
       <div className="msg msg-system">
@@ -16,8 +19,9 @@ export default function MessageBubble({ msg }: MessageBubbleProps) {
   }
 
   if (msg.type === 'text') {
+    const borderColor = agentColor ?? CLAUDE_ORANGE;
     return (
-      <div className="msg msg-text">
+      <div className="msg msg-text" style={{ borderLeft: `3px solid ${borderColor}`, paddingLeft: 10 }}>
         <span className="msg-tag">OUT</span>
         <div className="msg-body">{msg.text}</div>
       </div>

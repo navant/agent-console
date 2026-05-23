@@ -209,4 +209,17 @@ router.get('/:sessionId/messages', async (req: Request, res: Response) => {
   }
 });
 
+// DELETE /api/sessions/:sessionId
+router.delete('/:sessionId', (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const filePath = findSessionFile(sessionId);
+    if (!filePath) return res.status(404).json({ error: 'Session not found' });
+    fs.unlinkSync(filePath);
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 export default router;

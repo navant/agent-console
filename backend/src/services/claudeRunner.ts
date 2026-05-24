@@ -35,6 +35,10 @@ export interface RunOptions {
 
 let activeProcess: ChildProcess | null = null;
 
+export function isClaudeRunning(): boolean {
+  return activeProcess !== null;
+}
+
 export function stopActive(): void {
   if (activeProcess) {
     activeProcess.kill('SIGTERM');
@@ -56,26 +60,22 @@ export function runClaude(opts: RunOptions): void {
   // Skip permission prompts (we're running headless)
   args.push('--dangerously-skip-permissions');
 
+  const resolvedWorkspace = workspacePath ? expandHome(workspacePath) : null;
+  if (resolvedWorkspace && fs.existsSync(resolvedWorkspace)) {
+    args.push('--add-dir', resolvedWorkspace);
+  }
+
   if (sessionId) {
-    // Resume: session already carries model/tools/system-prompt
     args.push('--resume', sessionId);
   } else {
-    // Only pass --model if an agent specified one
     if (model) args.push('--model', model);
 
-    // Only pass soul if the file exists
     if (soulPath && fs.existsSync(soulPath)) {
       args.push('--append-system-prompt-file', soulPath);
     }
 
-    // Only restrict tools if an agent specified them; otherwise claude uses defaults
     if (tools.length > 0) {
       args.push('--allowedTools', ...tools);
-    }
-
-    const resolvedWorkspace = workspacePath ? expandHome(workspacePath) : null;
-    if (resolvedWorkspace && fs.existsSync(resolvedWorkspace)) {
-      args.push('--add-dir', resolvedWorkspace);
     }
   }
 

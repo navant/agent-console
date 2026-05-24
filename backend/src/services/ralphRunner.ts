@@ -5,7 +5,8 @@ import {
   buildMemoryContext,
   getAgent,
   getAgentSoulPath,
-  getSkillContent,
+  buildSkillInvocationPrompt,
+  ensureSkillToolAllowed,
   getTask,
   getTaskPlan,
   getAgentMemory,
@@ -57,7 +58,7 @@ export async function runRalphLoop(
     .sort((a, b) => a.priority - b.priority);
 
   if (pending.length === 0) {
-    task.status = 'awaiting_confirmation';
+    task.status = 'review';
     task.updatedAt = new Date().toISOString();
     saveTask(task, workspacePath);
     callbacks.onTaskUpdate(task);
@@ -67,7 +68,7 @@ export async function runRalphLoop(
   ralphRunning = true;
   const resolvedWs = expandHome(workspacePath);
   const memory = buildMemoryContext(workspacePath, task.agent);
-  const skillPrefix = getSkillContent(task.skills, workspacePath);
+  const skillPrefix = buildSkillInvocationPrompt(task.skills, workspacePath);
   const soulPath = agent ? getAgentSoulPath(task.agent, workspacePath) : '';
 
   task.status = 'running';
@@ -96,7 +97,11 @@ export async function runRalphLoop(
       await runClaudeOnce({
         taskId,
         prompt: fullPrompt,
-        agent: agent ?? { id: '', model: '', tools: [] },
+        agent: {
+          id: agent?.id ?? '',
+          model: agent?.model ?? '',
+          tools: task.skills.length > 0 ? ensureSkillToolAllowed(agent?.tools ?? []) : (agent?.tools ?? []),
+        },
         soulPath,
         workspacePath: resolvedWs,
         sessionId: task.session_id,
@@ -152,7 +157,7 @@ export async function runRalphLoop(
   }
 
   const remaining = getTaskPlan(taskId, workspacePath).userStories.filter(s => !s.passes);
-  task.status = remaining.length === 0 ? 'awaiting_confirmation' : 'review';
+  task.status = 'review';
   task.updatedAt = new Date().toISOString();
   saveTask(task, workspacePath);
   callbacks.onTaskUpdate(task);

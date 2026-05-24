@@ -1,0 +1,19 @@
+types:
+  - id: planning
+    name: Planning
+    agent: ''
+    skills: []
+    workflow: single-shot
+    default: true
+  - id: review
+    name: Review
+    agent: ''
+    skills: []
+    workflow: single-shot
+    default: false
+  - id: implement
+    name: Implement
+    agent: ''
+    skills: []
+    workflow: single-shot
+    default: false

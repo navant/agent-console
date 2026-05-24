@@ -7,7 +7,8 @@ import MemoryView from '../views/MemoryView';
 import AgentsSection from '../sidebar/AgentsSection';
 import SkillsSection from '../sidebar/SkillsSection';
 import WorkflowsSection from '../sidebar/WorkflowsSection';
-import PRDSection from '../sidebar/PRDSection';
+import PRDView from '../views/PRDView';
+import SettingsView from '../views/SettingsView';
 
 function PanelSection({ children }: { children: React.ReactNode }) {
   return <div className="panel-view">{children}</div>;
@@ -52,15 +53,9 @@ function ViewContent({ view }: { view: WorkspaceViewId }) {
         </PanelSection>
       );
     case 'prd':
-      return (
-        <PanelSection>
-          <div className="panel-view-hd">
-            <h2>PRD</h2>
-            <p className="muted">Plan for the selected task</p>
-          </div>
-          <PRDSection panel />
-        </PanelSection>
-      );
+      return <PRDView />;
+    case 'settings':
+      return <SettingsView />;
     default:
       return null;
   }

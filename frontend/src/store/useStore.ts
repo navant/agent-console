@@ -5,9 +5,13 @@ import {
   PlanConfig,
   SkillConfig,
   TaskConfig,
+  TaskComment,
+  TaskTypeDef,
   WorkflowConfig,
   WorkspaceConfig,
   ChatMessage,
+  PathSettings,
+  PrdFile,
   WorkspaceTab,
   WorkspaceViewId,
 } from '../types';
@@ -20,6 +24,7 @@ const VIEW_LABELS: Record<WorkspaceViewId, string> = {
   skills: 'Skills',
   workflows: 'Workflows',
   prd: 'PRD',
+  settings: 'Settings',
 };
 
 const DEFAULT_TABS: WorkspaceTab[] = [
@@ -35,6 +40,9 @@ import {
   getMemory,
   activateWorkspace,
   createWorkspace,
+  getConfig,
+  getTaskTypes,
+  getSessionMessages,
 } from '../api/client';
 
 interface Store {
@@ -48,6 +56,7 @@ interface Store {
   memory: MemoryState | null;
   taskPlans: Record<string, PlanConfig>;
   taskProgress: Record<string, string>;
+  taskComments: Record<string, TaskComment[]>;
   selectedSkills: string[];
 
   // UI state
@@ -71,6 +80,11 @@ interface Store {
   workspaceTabs: WorkspaceTab[];
   activeTabId: string;
   pinnedDock: WorkspaceViewId | null;
+  pathSettings: PathSettings | null;
+  pendingPrdPath: string | null;
+  autoQueue: boolean;
+  taskTypes: TaskTypeDef[];
+  chatSkillBootstrap: boolean;
 
   // Actions — data
   loadAll: () => Promise<void>;
@@ -93,6 +107,8 @@ interface Store {
   setMemory: (memory: MemoryState | null) => void;
   setTaskPlan: (taskId: string, plan: PlanConfig) => void;
   appendTaskProgress: (taskId: string, line: string) => void;
+  setTaskComments: (taskId: string, comments: TaskComment[]) => void;
+  appendTaskComment: (taskId: string, comment: TaskComment) => void;
   toggleSkillSelection: (id: string) => void;
   setSelectedSkills: (ids: string[]) => void;
 
@@ -115,8 +131,15 @@ interface Store {
   setPanelMode: (mode: 'chat' | 'terminal') => void;
   setShowTaskDetail: (show: boolean) => void;
   openWorkspaceTab: (view: WorkspaceViewId) => void;
+  openPrdFile: (path: string) => void;
+  clearPendingPrdPath: () => void;
   closeWorkspaceTab: (tabId: string) => void;
   setActiveTabId: (tabId: string) => void;
+  setPathSettings: (pathSettings: PathSettings) => void;
+  setTaskTypes: (taskTypes: TaskTypeDef[]) => void;
+  setAutomation: (autoQueue: boolean) => void;
+  setChatSkillBootstrap: (bootstrap: boolean) => void;
+  continueTaskInChat: (taskId: string) => Promise<void>;
   togglePinnedDock: (view: WorkspaceViewId) => void;
 }
 
@@ -130,6 +153,7 @@ export const useStore = create<Store>((set, get) => ({
   memory: null,
   taskPlans: {},
   taskProgress: {},
+  taskComments: {},
   selectedSkills: [],
 
   selectedTaskId: null,
@@ -147,7 +171,7 @@ export const useStore = create<Store>((set, get) => ({
     tasks: true,
   },
   previewSkillId: null,
-  theme: 'dark',
+  theme: 'light',
   accent: '#7aa7d4',
   density: 'regular',
   searchQuery: '',
@@ -159,13 +183,19 @@ export const useStore = create<Store>((set, get) => ({
   workspaceTabs: [...DEFAULT_TABS],
   activeTabId: 'tab-tasks',
   pinnedDock: null,
+  pathSettings: null,
+  pendingPrdPath: null,
+  autoQueue: true,
+  taskTypes: [],
+  chatSkillBootstrap: false,
 
   loadAll: async () => {
     try {
-      const wsData = await getWorkspaces();
+      const [wsData, config] = await Promise.all([getWorkspaces(), getConfig()]);
       set({
         workspaces: wsData.workspaces,
         activeWorkspaceId: wsData.activeWorkspace,
+        pathSettings: config.pathSettings ?? null,
       });
       await get().loadWorkspaceData();
     } catch (err) {
@@ -178,21 +208,18 @@ export const useStore = create<Store>((set, get) => ({
     try {
       if (!activeWorkspaceId) {
         const [agents, skills] = await Promise.all([getAgents(), getSkills()]);
-        set({ agents, skills, tasks: [], workflows: [], memory: null });
+        set({ agents, skills, tasks: [], workflows: [], memory: null, taskTypes: [] });
         return;
       }
-      const [agents, tasks, skills, workflows, memory] = await Promise.all([
+      const [agents, tasks, skills, workflows, memory, taskTypesRes] = await Promise.all([
         getAgents(),
         getTasks(),
         getSkills(),
         getWorkflows().catch(() => [] as WorkflowConfig[]),
         getMemory().catch(() => null),
+        getTaskTypes().catch(() => ({ types: [] as TaskTypeDef[] })),
       ]);
-      set({ agents, tasks, skills, workflows, memory });
-      const { chatAgent } = get();
-      if (!chatAgent && agents.length > 0) {
-        set({ chatAgent: agents[0].id });
-      }
+      set({ agents, tasks, skills, workflows, memory, taskTypes: taskTypesRes.types });
     } catch (err) {
       console.error('Failed to load workspace data:', err);
     }
@@ -257,6 +284,15 @@ export const useStore = create<Store>((set, get) => ({
       [taskId]: (s.taskProgress[taskId] ?? '') + line + '\n',
     },
   })),
+  setTaskComments: (taskId, comments) => set(s => ({
+    taskComments: { ...s.taskComments, [taskId]: comments },
+  })),
+  appendTaskComment: (taskId, comment) => set(s => ({
+    taskComments: {
+      ...s.taskComments,
+      [taskId]: [...(s.taskComments[taskId] ?? []), comment],
+    },
+  })),
   toggleSkillSelection: (id) => set(s => ({
     selectedSkills: s.selectedSkills.includes(id)
       ? s.selectedSkills.filter(x => x !== id)
@@ -303,6 +339,13 @@ export const useStore = create<Store>((set, get) => ({
     set({ workspaceTabs: [...workspaceTabs, tab], activeTabId: tab.id });
   },
 
+  openPrdFile: (path) => {
+    set({ pendingPrdPath: path });
+    get().openWorkspaceTab('prd');
+  },
+
+  clearPendingPrdPath: () => set({ pendingPrdPath: null }),
+
   closeWorkspaceTab: (tabId) => {
     const { workspaceTabs, activeTabId } = get();
     const tab = workspaceTabs.find(t => t.id === tabId);
@@ -316,6 +359,43 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setActiveTabId: (activeTabId) => set({ activeTabId }),
+
+  setPathSettings: (pathSettings) => set({ pathSettings }),
+
+  setTaskTypes: (taskTypes) => set({ taskTypes }),
+
+  setAutomation: (autoQueue) => set({ autoQueue }),
+
+  setChatSkillBootstrap: (bootstrap) => set({ chatSkillBootstrap: bootstrap }),
+
+  continueTaskInChat: async (taskId) => {
+    const task = get().tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    set({
+      selectedTaskId: taskId,
+      chatAgent: task.agent || '',
+      showTaskDetail: false,
+      currentSessionId: task.session_id ?? null,
+      chatSkillBootstrap: (task.skills?.length ?? 0) > 0,
+    });
+    get().clearMessages();
+    get().openWorkspaceTab('chat');
+
+    if (task.session_id) {
+      try {
+        const history = await getSessionMessages(task.session_id);
+        history.forEach(m => {
+          get().addMessage({ type: m.type, text: m.text, tool: m.tool, input: m.input });
+        });
+      } catch {
+        get().addMessage({
+          type: 'system',
+          text: `Could not load session ${task.session_id.slice(0, 8)}… — start a new message to continue.`,
+        });
+      }
+    }
+  },
 
   togglePinnedDock: (view) => {
     const { pinnedDock } = get();

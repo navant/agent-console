@@ -13,6 +13,7 @@ const NAV: { view: WorkspaceViewId; label: string; glyph: string }[] = [
   { view: 'skills', label: 'Skills', glyph: '◈' },
   { view: 'workflows', label: 'Workflows', glyph: '↻' },
   { view: 'prd', label: 'PRD', glyph: '≡' },
+  { view: 'settings', label: 'Settings', glyph: '⚙' },
 ];
 
 export default function SidebarNav() {

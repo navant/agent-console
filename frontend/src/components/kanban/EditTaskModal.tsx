@@ -1,20 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
-import { createTask, getPrdFiles } from '../../api/client';
+import { getPrdFiles, getTask, updateTask as updateTaskApi } from '../../api/client';
 import { PrdFile } from '../../types';
 import TaskTypeFields from './TaskTypeFields';
 
-interface CreateTaskModalProps {
+interface EditTaskModalProps {
   open: boolean;
+  taskId: string | null;
   onClose: () => void;
-  onCreated?: (taskId: string, isProject: boolean) => void;
 }
 
-export default function CreateTaskModal({ open, onClose, onCreated }: CreateTaskModalProps) {
-  const workflows = useStore(s => s.workflows);
-  const taskTypes = useStore(s => s.taskTypes);
-  const selectedSkills = useStore(s => s.selectedSkills);
-  const addTask = useStore(s => s.addTask);
+export default function EditTaskModal({ open, taskId, onClose }: EditTaskModalProps) {
+  const tasks = useStore(s => s.tasks);
+  const updateTask = useStore(s => s.updateTask);
+
+  const task = tasks.find(t => t.id === taskId);
 
   const [title, setTitle] = useState('');
   const [taskTypeId, setTaskTypeId] = useState('');
@@ -28,18 +28,21 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (open) {
-      setTitle('');
-      setDescription('');
-      setTaskTypeId('');
-      setAgentId('');
-      setWorkflowId(workflows[0]?.id || 'single-shot');
-      setSkillIds([...selectedSkills]);
-      setSkillSearch('');
-      setPrdPath('');
-      getPrdFiles().then(setPrds).catch(() => setPrds([]));
-    }
-  }, [open, workflows, selectedSkills]);
+    if (!open || !taskId) return;
+    const t = tasks.find(x => x.id === taskId);
+    if (!t) return;
+    setTitle(t.title);
+    setTaskTypeId(t.taskType ?? '');
+    setAgentId(t.agent);
+    setWorkflowId(t.workflow);
+    setPrdPath(t.prd ?? '');
+    setSkillIds([...t.skills]);
+    setSkillSearch('');
+    getPrdFiles().then(setPrds).catch(() => setPrds([]));
+    getTask(taskId)
+      .then(full => setDescription(full.prompt ?? full.description ?? ''))
+      .catch(() => setDescription(t.description ?? ''));
+  }, [open, taskId, tasks]);
 
   useEffect(() => {
     if (!open) return;
@@ -48,29 +51,28 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !task) return null;
 
-  const selectedWorkflow = workflows.find(w => w.id === workflowId);
   const valid = title.trim().length > 0 && (workflowId || taskTypeId);
+  const isRunning = task.status === 'running';
 
   const submit = async () => {
-    if (!valid || submitting) return;
+    if (!valid || submitting || isRunning) return;
     setSubmitting(true);
     try {
-      const task = await createTask({
+      const updated = await updateTaskApi(task.id, {
         title: title.trim(),
         agent: agentId,
         workflow: workflowId,
         skills: skillIds,
-        description: description.trim(),
         prd: prdPath || undefined,
-        taskType: taskTypeId || undefined,
+        description: description.trim(),
+        taskType: taskTypeId,
       });
-      addTask(task);
+      updateTask(updated);
       onClose();
-      onCreated?.(task.id, task.type === 'project');
     } catch (err) {
-      console.error('Failed to create task:', err);
+      console.error('Failed to update task:', err);
     } finally {
       setSubmitting(false);
     }
@@ -81,17 +83,29 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
       <div className="modal" style={{ width: 560 }} onMouseDown={e => e.stopPropagation()}>
         <header className="modal-hd">
           <div>
-            <div className="modal-eyebrow">New task</div>
-            <h2 className="modal-title">Create a task</h2>
+            <div className="modal-eyebrow">Edit task</div>
+            <h2 className="modal-title">{task.id}</h2>
           </div>
           <button className="modal-x" onClick={onClose}>✕</button>
         </header>
 
         <div className="modal-body">
+          {isRunning && (
+            <p className="field-hint" style={{ marginBottom: 12 }}>
+              Stop the run before editing this task.
+            </p>
+          )}
           <div className="form-grid">
             <div className="field">
               <label className="field-lbl"><span>Title</span></label>
-              <textarea className="text" rows={2} autoFocus value={title} onChange={e => setTitle(e.target.value)} />
+              <textarea
+                className="text"
+                rows={2}
+                autoFocus
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                disabled={isRunning}
+              />
             </div>
 
             <TaskTypeFields
@@ -105,14 +119,15 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
               onSkillIdsChange={setSkillIds}
               skillSearch={skillSearch}
               onSkillSearchChange={setSkillSearch}
+              disabled={isRunning}
             />
 
             <div className="field">
               <label className="field-lbl">
                 <span>PRD</span>
-                <span className="field-hint">optional — markdown spec from prd folder</span>
+                <span className="field-hint">optional</span>
               </label>
-              <select className="text mono" value={prdPath} onChange={e => setPrdPath(e.target.value)}>
+              <select className="text mono" value={prdPath} onChange={e => setPrdPath(e.target.value)} disabled={isRunning}>
                 <option value="">None</option>
                 {prds.map(p => (
                   <option key={p.id} value={p.path}>{p.name}</option>
@@ -123,22 +138,27 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
             <div className="field">
               <label className="field-lbl">
                 <span>Notes</span>
-                <span className="field-hint">extra context (optional if PRD selected)</span>
+                <span className="field-hint">extra context</span>
               </label>
-              <textarea className="text mono" rows={5} value={description} onChange={e => setDescription(e.target.value)} />
+              <textarea
+                className="text mono"
+                rows={5}
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                disabled={isRunning}
+              />
             </div>
           </div>
         </div>
 
         <footer className="modal-ft">
           <div className="modal-ft-meta muted">
-            {selectedWorkflow?.type === 'loop' ? 'Creates project task' : 'Creates simple task'}
-            {taskTypeId && ` · ${taskTypes.find(t => t.id === taskTypeId)?.name ?? taskTypeId}`}
+            {task.status} · {task.type}{task.taskType ? ` · ${task.taskType}` : ''}
           </div>
           <div className="modal-ft-actions">
             <button className="btn" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" onClick={submit} disabled={!valid || submitting}>
-              {submitting ? 'Creating…' : 'Create task'}
+            <button className="btn btn-primary" onClick={submit} disabled={!valid || submitting || isRunning}>
+              {submitting ? 'Saving…' : 'Save changes'}
             </button>
           </div>
         </footer>

@@ -1,11 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
 import { wsManager } from './api/client';
 import { WSServerMessage } from './types';
 import Layout from './components/layout/Layout';
 import Workspace from './components/workspace/Workspace';
 import CreateTaskModal from './components/kanban/CreateTaskModal';
-import PlanEditor from './components/kanban/PlanEditor';
 import WorkflowModal from './components/kanban/WorkflowModal';
 import AgentModal from './components/agents/AgentModal';
 import WorkspaceModal from './components/workspaces/WorkspaceModal';
@@ -23,21 +22,15 @@ export default function App() {
   const setWsConnected = useStore(s => s.setWsConnected);
   const updateTask = useStore(s => s.updateTask);
   const appendTaskProgress = useStore(s => s.appendTaskProgress);
+  const appendTaskComment = useStore(s => s.appendTaskComment);
+  const setAutomation = useStore(s => s.setAutomation);
   const setTaskPlan = useStore(s => s.setTaskPlan);
   const selectedTaskId = useStore(s => s.selectedTaskId);
   const setSelectedTaskId = useStore(s => s.setSelectedTaskId);
 
-  const [planTaskId, setPlanTaskId] = useState<string | null>(null);
-
   useEffect(() => {
     loadAll();
   }, [loadAll]);
-
-  useEffect(() => {
-    if (modal === 'plan') {
-      setPlanTaskId(selectedTaskId);
-    }
-  }, [modal, selectedTaskId]);
 
   useEffect(() => {
     wsManager.connect();
@@ -73,6 +66,12 @@ export default function App() {
         case 'progress_append':
           appendTaskProgress(msg.taskId, msg.line);
           break;
+        case 'comment_append':
+          appendTaskComment(msg.taskId, msg.comment);
+          break;
+        case 'automation_state':
+          setAutomation(msg.autoQueue);
+          break;
         case 'story_complete':
           setTaskPlan(msg.taskId, {
             userStories: useStore.getState().taskPlans[msg.taskId]?.userStories.map(s =>
@@ -83,14 +82,17 @@ export default function App() {
       }
     });
 
-    const interval = setInterval(() => setWsConnected(wsManager.isConnected), 1000);
+    const interval = setInterval(() => {
+      const connected = wsManager.isConnected;
+      if (connected !== useStore.getState().wsConnected) setWsConnected(connected);
+    }, 1000);
     return () => {
       unsubscribe();
       clearInterval(interval);
     };
   }, [
     addMessage, setRunning, setCurrentSessionId, setWsConnected,
-    updateTask, appendTaskProgress, setTaskPlan,
+    updateTask, appendTaskProgress, appendTaskComment, setAutomation, setTaskPlan,
   ]);
 
   return (
@@ -105,15 +107,7 @@ export default function App() {
       <CreateTaskModal
         open={modal === 'task'}
         onClose={() => setModal(null)}
-        onCreated={(id) => {
-          setSelectedTaskId(id);
-          setPlanTaskId(id);
-        }}
-      />
-      <PlanEditor
-        open={modal === 'plan'}
-        taskId={planTaskId ?? selectedTaskId}
-        onClose={() => setModal(null)}
+        onCreated={(id) => setSelectedTaskId(id)}
       />
       <WorkflowModal open={modal === 'workflow'} onClose={() => setModal(null)} />
       <AgentModal open={modal === 'agent'} onClose={() => setModal(null)} />

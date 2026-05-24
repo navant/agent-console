@@ -334,3 +334,63 @@ Post-run, memories are written back via claude-mem hooks.
     Recent memories: [list of last 5 compressed summaries]
     [Search memories...]
 ```
+
+---
+
+## Phase 5 — PRD library + Settings + Markdown
+
+**Goal:** External PRD markdown files drive tasks; all disk paths configurable; shared markdown viewer/editor across PRD and memory.
+
+### Path settings
+
+Stored in `~/.agent-control-panel/config.yaml` under `pathSettings`. Defaults (workspace-relative unless noted):
+
+| Key | Default |
+|-----|---------|
+| `prd` | `.claude/prd` |
+| `tasks` | `.claude/tasks` |
+| `agents` | `.claude/agents` |
+| `skills` | `.claude/skills` |
+| `workflows` | `.claude/workflows` |
+| `memory` | `.claude/memory` |
+| `globalAgents` | `~/.claude/agents` |
+| `globalSkills` | `~/.claude/skills` |
+
+**API:** `GET /api/config` returns `pathSettings`; `PUT /api/config/paths` updates them.
+
+**UI:** Settings tab — form to edit all paths, save, reset defaults.
+
+### PRD library
+
+- PRDs are `.md` files in the workspace PRD folder (default `.claude/prd`).
+- **PRD tab:** file tree, search, markdown view/edit/save, “+ New PRD”, **Implement as task**.
+- **Implement as task:** `POST /api/prd/implement` — creates task with `prd` field set, title from filename, description from PRD body excerpt.
+
+**API:**
+- `GET /api/prd` — list PRD files
+- `GET /api/prd/file?path=` — read
+- `PUT /api/prd/file?path=` — save
+- `POST /api/prd` — create new file
+- `POST /api/prd/implement` — create linked task
+
+### Tasks ↔ PRD (replaces per-task plan UI)
+
+- Remove embedded `prd.json` / PlanEditor flow from UI.
+- `task.json` gains optional `prd` field (relative path within PRD folder).
+- **Create task:** optional PRD dropdown.
+- **Task detail:** shows linked PRD + “Open in PRD”.
+- **Run:** `buildTaskPrompt` prepends linked PRD markdown + memory + skills + `prompt.md`.
+
+Legacy `prd.json` / plan API remains in backend for loop workflows until fully migrated.
+
+### Markdown viewer/editor
+
+Shared `MarkdownEditor` component:
+- **View** mode — rendered HTML via `marked`
+- **Edit** mode — textarea + Save
+- Used in **PRD tab** and **Memory tab** (wiki / workspace / agent files)
+
+### Sidebar nav
+
+Add **PRD** and **Settings** workspace tabs alongside Tasks, Chat, Memory, Agents, Skills, Workflows.
+

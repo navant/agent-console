@@ -6,9 +6,13 @@ import {
   PlanConfig,
   SkillConfig,
   TaskConfig,
+  TaskComment,
+  TaskTypeDef,
   WorkflowConfig,
   WorkspaceConfig,
   WorkspacesResponse,
+  PathSettings,
+  PrdFile,
   CreateWorkspaceResponse,
   WSServerMessage,
 } from '../types';
@@ -30,6 +34,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 export const getConfig = () => request<AppConfig>('/config');
+export const updatePathSettings = (paths: Partial<PathSettings>) =>
+  request<PathSettings>('/config/paths', { method: 'PUT', body: JSON.stringify(paths) });
 export const switchWorkspace = (workspaceId: string) =>
   request<{ activeWorkspace: string; workspace: WorkspaceConfig }>('/config/workspace', {
     method: 'POST',
@@ -56,13 +62,44 @@ export const deleteWorkspace = (id: string) =>
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 export const getTasks = () => request<TaskConfig[]>('/tasks');
+export const getTask = (id: string) =>
+  request<TaskConfig & { prompt?: string }>(`/tasks/${id}`);
 export const createTask = (data: {
   title: string;
   agent?: string;
-  workflow: string;
+  workflow?: string;
   skills?: string[];
   description?: string;
+  prd?: string;
+  taskType?: string;
 }) => request<TaskConfig>('/tasks', { method: 'POST', body: JSON.stringify(data) });
+
+export const getTaskTypes = () => request<{ types: TaskTypeDef[] }>('/task-types');
+export const saveTaskTypes = (types: TaskTypeDef[]) =>
+  request<{ types: TaskTypeDef[] }>('/task-types', { method: 'PUT', body: JSON.stringify({ types }) });
+
+// ─── PRD ──────────────────────────────────────────────────────────────────────
+export const getPrdFiles = () => request<PrdFile[]>('/prd');
+export const getPrdFile = (path: string) =>
+  request<{ path: string; content: string }>(`/prd/file?path=${encodeURIComponent(path)}`);
+export const savePrdFile = (path: string, content: string) =>
+  request<{ path: string; content: string }>('/prd/file', {
+    method: 'PUT',
+    body: JSON.stringify({ path, content }),
+  });
+export const createPrd = (filename: string, content?: string) =>
+  request<{ file: PrdFile; task: TaskConfig | null }>('/prd', {
+    method: 'POST',
+    body: JSON.stringify({ filename, content }),
+  });
+export const implementPrd = (data: {
+  prdPath: string;
+  agent?: string;
+  workflow?: string;
+  skills?: string[];
+  title?: string;
+  taskType?: string;
+}) => request<TaskConfig>('/prd/implement', { method: 'POST', body: JSON.stringify(data) });
 export const updateTask = (id: string, data: Partial<TaskConfig> & { description?: string }) =>
   request<TaskConfig>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteTask = (id: string) =>
@@ -78,10 +115,30 @@ export const generateTaskPlan = (id: string, description?: string) =>
   });
 export const getTaskProgress = (id: string) =>
   request<{ content: string }>(`/tasks/${id}/progress`);
+export const getTaskMarkdown = (id: string) =>
+  request<{ content: string }>(`/tasks/${id}/markdown`);
+export const saveTaskMarkdown = (id: string, content: string) =>
+  request<{ task: TaskConfig; content: string }>(`/tasks/${id}/markdown`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
 export const confirmTask = (id: string) =>
   request<TaskConfig>(`/tasks/${id}/confirm`, { method: 'POST' });
 export const rejectTask = (id: string) =>
   request<TaskConfig>(`/tasks/${id}/reject`, { method: 'POST' });
+export const getTaskComments = (id: string) =>
+  request<{ comments: TaskComment[] }>(`/tasks/${id}/comments`);
+export const addTaskComment = (id: string, text: string) =>
+  request<TaskComment>(`/tasks/${id}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+
+export const runTask = (taskId: string, nudge = false) =>
+  wsManager.send({ type: 'run_task', taskId, nudge });
+
+export const startAutoQueue = () => wsManager.send({ type: 'auto_queue_start' });
+export const stopAutoQueue = () => wsManager.send({ type: 'auto_queue_stop' });
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
 export const getSkills = () => request<SkillConfig[]>('/skills');

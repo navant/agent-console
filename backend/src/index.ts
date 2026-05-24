@@ -11,19 +11,25 @@ import configRouter from './routes/config';
 import workflowsRouter from './routes/workflows';
 import memoryRouter from './routes/memory';
 import browseRouter from './routes/browse';
+import prdRouter from './routes/prd';
+import taskTypesRouter from './routes/taskTypes';
 import {
+  getActiveWorkspace,
   getTask,
   getAgent,
-  getActiveWorkspace,
-  saveTask,
   getAgentSoulPath,
-  getTaskPrompt,
-  buildMemoryContext,
-  getSkillContent,
-  appendTaskProgress,
+  buildSkillInvocationPrompt,
+  ensureSkillToolAllowed,
 } from './services/fileStore';
-import { runClaude, stopActive } from './services/claudeRunner';
-import { runRalphLoop, stopRalph } from './services/ralphRunner';
+import { executeTask, stopTaskRunner } from './services/taskRunner';
+import {
+  setTaskQueueCallbacks,
+  setAutoQueue,
+  tick,
+  getAutomationState,
+} from './services/taskQueue';
+import { runSlashCommand, stopRalph } from './services/ptyRunner';
+import { runClaude } from './services/claudeRunner';
 
 const PORT = 3001;
 
@@ -38,16 +44,16 @@ app.use('/api/skills', skillsRouter);
 app.use('/api/workflows', workflowsRouter);
 app.use('/api/memory', memoryRouter);
 app.use('/api/sessions', sessionsRouter);
-
 app.use('/api/browse', browseRouter);
+app.use('/api/prd', prdRouter);
+app.use('/api/task-types', taskTypesRouter);
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), automation: getAutomationState() });
 });
 
 const server = createServer(app);
 
-// ── Task/chat WebSocket  (/ws) ────────────────────────────────────────────────
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
@@ -73,28 +79,20 @@ function sendTo(ws: WebSocket, msg: WSServerMessage): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function buildTaskPrompt(
-  taskId: string,
-  workspacePath: string,
-  task: { agent: string; skills: string[]; title: string }
-): string {
-  const memory = buildMemoryContext(workspacePath, task.agent);
-  const skills = getSkillContent(task.skills, workspacePath);
-  const prompt = getTaskPrompt(taskId, workspacePath) || task.title;
-  const parts: string[] = [];
-  if (memory) parts.push(memory);
-  if (skills) parts.push(skills);
-  parts.push(prompt);
-  return parts.join('\n\n---\n\n');
-}
-
 wss.on('connection', (ws: WebSocket) => {
   clients.add(ws);
+
+  sendTo(ws, { type: 'automation_state', ...getAutomationState() });
 
   ws.on('message', (raw: Buffer) => {
     let msg: WSClientMessage;
     try { msg = JSON.parse(raw.toString()) as WSClientMessage; }
     catch { sendTo(ws, { type: 'error', message: 'Invalid JSON' }); return; }
+
+    const runCallbacks = {
+      sendTo: (m: WSServerMessage) => sendTo(ws, m),
+      broadcast,
+    };
 
     try {
       if (msg.type === 'run_task') {
@@ -103,111 +101,56 @@ wss.on('connection', (ws: WebSocket) => {
           sendTo(ws, { type: 'error', message: 'No active workspace' });
           return;
         }
-
-        const task = getTask(msg.taskId, activeWs.path);
-        if (!task) { sendTo(ws, { type: 'error', message: `Task ${msg.taskId} not found` }); return; }
-
-        const agent = task.agent ? getAgent(task.agent, activeWs.path) : null;
-        if (task.agent && !agent) {
-          sendTo(ws, { type: 'error', message: `Agent "${task.agent}" not found` });
-          return;
-        }
-
-        const soulPath = agent ? getAgentSoulPath(agent.id, activeWs.path) : '';
-
-        task.status = 'running';
-        task.updatedAt = new Date().toISOString();
-        saveTask(task, activeWs.path);
-        broadcast({ type: 'task_update', task });
-
-        if (task.type === 'project') {
-          runRalphLoop(msg.taskId, activeWs.path, {
-            onMessage: (m) => {
-              sendTo(ws, m);
-              if (m.type === 'session_start') {
-                task.session_id = m.sessionId;
-                task.updatedAt = new Date().toISOString();
-                saveTask(task, activeWs.path);
-              }
-            },
-            onProgress: (line) => {
-              broadcast({ type: 'progress_append', taskId: task.id, line });
-            },
-            onStoryComplete: (storyId) => {
-              broadcast({ type: 'story_complete', taskId: task.id, storyId });
-            },
-            onTaskUpdate: (updated) => {
-              broadcast({ type: 'task_update', task: updated });
-            },
-          })
-            .then(() => sendTo(ws, { type: 'done', result: 'Task completed' }))
-            .catch((err) => {
-              sendTo(ws, { type: 'error', message: String(err) });
-              task.status = 'review';
-              task.updatedAt = new Date().toISOString();
-              saveTask(task, activeWs.path);
-              broadcast({ type: 'task_update', task });
-            });
-        } else {
-          const prompt = buildTaskPrompt(msg.taskId, activeWs.path, task);
-
-          runClaude({
-            taskId: task.id,
-            prompt,
-            agentId: agent?.id ?? '',
-            model: agent?.model ?? '',
-            soulPath,
-            workspacePath: activeWs.path,
-            tools: agent?.tools ?? [],
-            sessionId: task.session_id,
-            onMessage: (m) => {
-              sendTo(ws, m);
-              if (m.type === 'session_start') {
-                task.session_id = m.sessionId;
-                task.updatedAt = new Date().toISOString();
-                saveTask(task, activeWs.path);
-              }
-            },
-            onDone: (sessionId) => {
-              task.status = 'awaiting_confirmation';
-              task.session_id = sessionId || task.session_id;
-              task.updatedAt = new Date().toISOString();
-              saveTask(task, activeWs.path);
-              appendTaskProgress(
-                task.id,
-                activeWs.path,
-                `[${new Date().toISOString()}] Run finished — awaiting confirmation`,
-                (line) => broadcast({ type: 'progress_append', taskId: task.id, line })
-              );
-              sendTo(ws, { type: 'done', result: 'Awaiting confirmation' });
-              broadcast({ type: 'task_update', task });
-            },
-            onError: (err) => {
-              sendTo(ws, { type: 'error', message: err });
-              task.status = 'todo';
-              task.updatedAt = new Date().toISOString();
-              saveTask(task, activeWs.path);
-              broadcast({ type: 'task_update', task });
-            },
-          });
-        }
+        executeTask(msg.taskId, activeWs.path, { nudge: !!msg.nudge, source: 'manual' }, runCallbacks)
+          .then(() => void tick())
+          .catch(() => {});
+      } else if (msg.type === 'auto_queue_start') {
+        setAutoQueue(true);
+        broadcast({ type: 'automation_state', ...getAutomationState() });
+        void tick();
+      } else if (msg.type === 'auto_queue_stop') {
+        setAutoQueue(false);
+        broadcast({ type: 'automation_state', ...getAutomationState() });
       } else if (msg.type === 'stop') {
-        stopActive();
+        stopTaskRunner();
         stopRalph();
         sendTo(ws, { type: 'done', result: 'stopped' });
+      } else if (msg.type === 'slash_command') {
+        const activeWs = getActiveWorkspace();
+        runSlashCommand({
+          command: msg.command,
+          sessionId: msg.sessionId,
+          workspacePath: activeWs?.path,
+          onOutput: (text) => sendTo(ws, { type: 'text', content: text }),
+          onDone: () => sendTo(ws, { type: 'done', result: '' }),
+          onError: (err) => sendTo(ws, { type: 'error', message: err }),
+        });
       } else if (msg.type === 'chat') {
         const activeWs = getActiveWorkspace();
         const agentId = msg.agentName;
         const agent = agentId ? getAgent(agentId, activeWs?.path) : null;
         const soulPath = agent ? getAgentSoulPath(agent.id, activeWs?.path) : '';
 
+        let prompt = msg.message;
+        let tools = agent?.tools ?? [];
+        if (msg.taskId && activeWs?.path) {
+          const task = getTask(msg.taskId, activeWs.path);
+          if (task?.skills?.length) {
+            tools = ensureSkillToolAllowed(tools);
+            if (msg.bootstrapSkills) {
+              const skillBlock = buildSkillInvocationPrompt(task.skills, activeWs.path);
+              if (skillBlock) prompt = `${skillBlock}\n\n---\n\n${prompt}`;
+            }
+          }
+        }
+
         runClaude({
           taskId: 'chat',
-          prompt: msg.message,
+          prompt,
           agentId: agent?.id ?? '',
           model: agent?.model ?? '',
           soulPath,
-          tools: agent?.tools ?? [],
+          tools,
           sessionId: msg.sessionId,
           workspacePath: activeWs?.path,
           onMessage: (m) => sendTo(ws, m),
@@ -224,6 +167,13 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('close', () => { clients.delete(ws); });
   ws.on('error', () => { clients.delete(ws); });
 });
+
+setTaskQueueCallbacks({
+  sendTo: (m) => broadcast(m),
+  broadcast,
+});
+
+void tick();
 
 process.on('uncaughtException', (err) => {
   console.error('[server] uncaughtException:', err);

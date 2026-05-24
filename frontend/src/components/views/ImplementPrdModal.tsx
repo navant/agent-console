@@ -1,45 +1,67 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
-import { createTask, getPrdFiles } from '../../api/client';
-import { PrdFile } from '../../types';
-import TaskTypeFields from './TaskTypeFields';
+import { implementPrd } from '../../api/client';
+import TaskTypeFields, { applyTaskTypeSelection } from '../kanban/TaskTypeFields';
 
-interface CreateTaskModalProps {
-  open: boolean;
-  onClose: () => void;
-  onCreated?: (taskId: string, isProject: boolean) => void;
+function titleFromPrd(content: string, fallback: string): string {
+  const match = content.match(/^#\s+(.+)$/m);
+  return match?.[1]?.trim() || fallback.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
 }
 
-export default function CreateTaskModal({ open, onClose, onCreated }: CreateTaskModalProps) {
+function defaultImplementTypeId(types: { id: string; default?: boolean }[]): string {
+  return types.find(t => t.id === 'implement')?.id
+    ?? types.find(t => t.default)?.id
+    ?? '';
+}
+
+interface ImplementPrdModalProps {
+  open: boolean;
+  prdPath: string;
+  prdContent: string;
+  onClose: () => void;
+  onCreated?: (taskId: string) => void;
+}
+
+export default function ImplementPrdModal({
+  open,
+  prdPath,
+  prdContent,
+  onClose,
+  onCreated,
+}: ImplementPrdModalProps) {
   const workflows = useStore(s => s.workflows);
   const taskTypes = useStore(s => s.taskTypes);
-  const selectedSkills = useStore(s => s.selectedSkills);
   const addTask = useStore(s => s.addTask);
+  const openWorkspaceTab = useStore(s => s.openWorkspaceTab);
 
   const [title, setTitle] = useState('');
   const [taskTypeId, setTaskTypeId] = useState('');
   const [agentId, setAgentId] = useState('');
   const [workflowId, setWorkflowId] = useState('');
-  const [prdPath, setPrdPath] = useState('');
-  const [prds, setPrds] = useState<PrdFile[]>([]);
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const [skillSearch, setSkillSearch] = useState('');
-  const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (open) {
-      setTitle('');
-      setDescription('');
-      setTaskTypeId('');
+    if (!open) return;
+    const name = prdPath.split('/').pop() ?? prdPath;
+    setTitle(titleFromPrd(prdContent, name));
+    const typeId = defaultImplementTypeId(taskTypes);
+    setTaskTypeId(typeId);
+    if (typeId) {
+      const applied = applyTaskTypeSelection(typeId, taskTypes);
+      if (applied) {
+        setAgentId(applied.agentId);
+        setWorkflowId(applied.workflowId);
+        setSkillIds(applied.skillIds);
+      }
+    } else {
       setAgentId('');
       setWorkflowId(workflows[0]?.id || 'single-shot');
-      setSkillIds([...selectedSkills]);
-      setSkillSearch('');
-      setPrdPath('');
-      getPrdFiles().then(setPrds).catch(() => setPrds([]));
+      setSkillIds([]);
     }
-  }, [open, workflows, selectedSkills]);
+    setSkillSearch('');
+  }, [open, prdPath, prdContent, workflows, taskTypes]);
 
   useEffect(() => {
     if (!open) return;
@@ -57,20 +79,20 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
     if (!valid || submitting) return;
     setSubmitting(true);
     try {
-      const task = await createTask({
+      const task = await implementPrd({
+        prdPath,
         title: title.trim(),
         agent: agentId,
         workflow: workflowId,
         skills: skillIds,
-        description: description.trim(),
-        prd: prdPath || undefined,
         taskType: taskTypeId || undefined,
       });
       addTask(task);
       onClose();
-      onCreated?.(task.id, task.type === 'project');
+      onCreated?.(task.id);
+      openWorkspaceTab('tasks');
     } catch (err) {
-      console.error('Failed to create task:', err);
+      console.error('Failed to implement PRD as task:', err);
     } finally {
       setSubmitting(false);
     }
@@ -81,8 +103,9 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
       <div className="modal" style={{ width: 560 }} onMouseDown={e => e.stopPropagation()}>
         <header className="modal-hd">
           <div>
-            <div className="modal-eyebrow">New task</div>
-            <h2 className="modal-title">Create a task</h2>
+            <div className="modal-eyebrow">Implement PRD</div>
+            <h2 className="modal-title">Create task from PRD</h2>
+            <p className="field-hint mono">{prdPath}</p>
           </div>
           <button className="modal-x" onClick={onClose}>✕</button>
         </header>
@@ -106,27 +129,6 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
               skillSearch={skillSearch}
               onSkillSearchChange={setSkillSearch}
             />
-
-            <div className="field">
-              <label className="field-lbl">
-                <span>PRD</span>
-                <span className="field-hint">optional — markdown spec from prd folder</span>
-              </label>
-              <select className="text mono" value={prdPath} onChange={e => setPrdPath(e.target.value)}>
-                <option value="">None</option>
-                {prds.map(p => (
-                  <option key={p.id} value={p.path}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label className="field-lbl">
-                <span>Notes</span>
-                <span className="field-hint">extra context (optional if PRD selected)</span>
-              </label>
-              <textarea className="text mono" rows={5} value={description} onChange={e => setDescription(e.target.value)} />
-            </div>
           </div>
         </div>
 

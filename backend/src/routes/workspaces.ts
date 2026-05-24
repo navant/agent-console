@@ -7,13 +7,21 @@ import {
   setActiveWorkspace,
   getWorkspacesSnapshot,
 } from '../services/fileStore';
+import { expandHome } from '../config';
 import { WorkspaceConfig } from '../types';
+
+function expandSnapshot(snapshot: ReturnType<typeof getWorkspacesSnapshot>) {
+  return {
+    ...snapshot,
+    workspaces: snapshot.workspaces.map(w => ({ ...w, path: expandHome(w.path) })),
+  };
+}
 
 const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
   try {
-    res.json(getWorkspacesSnapshot());
+    res.json(expandSnapshot(getWorkspacesSnapshot()));
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -45,8 +53,8 @@ router.post('/', (req: Request, res: Response) => {
 
     registerWorkspace(workspace);
     res.status(201).json({
-      workspace,
-      ...getWorkspacesSnapshot(),
+      workspace: { ...workspace, path: expandHome(workspace.path) },
+      ...expandSnapshot(getWorkspacesSnapshot()),
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });

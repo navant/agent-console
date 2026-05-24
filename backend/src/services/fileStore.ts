@@ -8,6 +8,7 @@ import {
   MemoryFileEntry,
   MemoryState,
   PlanConfig,
+  PathSettings,
   SkillConfig,
   TaskConfig,
   TaskType,
@@ -16,18 +17,25 @@ import {
   WorkspaceConfig,
 } from '../types';
 import {
+  readTaskStatusFromMarkdown,
+  writeTaskMarkdown,
+  ensureTaskMarkdown,
+} from './taskMarkdown';
+import { resolveTaskTypeFields } from './taskTypesStore';
+import {
   CONFIG_PATH,
   DATA_DIR,
-  GLOBAL_AGENTS_DIR,
-  GLOBAL_SKILLS_DIR,
   PATHS,
   expandHome,
-  workspaceAgentsDir,
+  mergePathSettings,
+  resolveGlobalPath,
+  resolveWorkspacePath,
   workspaceClaudeDir,
-  workspaceMemoryPath,
+  workspaceAgentsDir,
   workspaceSkillsDir,
-  workspaceTasksDir,
   workspaceWorkflowsDir,
+  workspaceTasksDir,
+  workspaceMemoryPath,
 } from '../config';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -76,6 +84,22 @@ const DEFAULT_CONFIG: AppConfig = {
   registeredWorkspaces: [],
   memoryTier: 'simple',
 };
+
+export function getPathSettings(): PathSettings {
+  return mergePathSettings(getConfig().pathSettings);
+}
+
+export function savePathSettings(partial: Partial<PathSettings>): PathSettings {
+  const config = getConfig();
+  const merged = mergePathSettings(config.pathSettings);
+  config.pathSettings = { ...merged, ...partial };
+  saveConfig(config);
+  return mergePathSettings(config.pathSettings);
+}
+
+function wsDir(workspacePath: string, key: Exclude<keyof PathSettings, 'globalAgents' | 'globalSkills'>): string {
+  return resolveWorkspacePath(workspacePath, getPathSettings(), key);
+}
 
 export function getConfig(): AppConfig {
   ensureDir(DATA_DIR);
@@ -150,10 +174,12 @@ function ensureWorkspaceStructure(workspacePath: string): void {
   const resolved = expandHome(workspacePath);
   const dirs = [
     workspaceClaudeDir(resolved),
-    workspaceAgentsDir(resolved),
-    workspaceSkillsDir(resolved),
-    workspaceWorkflowsDir(resolved),
-    workspaceTasksDir(resolved),
+    wsDir(resolved, 'agents'),
+    wsDir(resolved, 'skills'),
+    wsDir(resolved, 'workflows'),
+    wsDir(resolved, 'tasks'),
+    wsDir(resolved, 'prd'),
+    wsDir(resolved, 'memory'),
   ];
   dirs.forEach(d => ensureDir(d));
 
@@ -163,8 +189,8 @@ function ensureWorkspaceStructure(workspacePath: string): void {
   }
 
   // Seed default workflows if missing
-  const singleDir = path.join(workspaceWorkflowsDir(resolved), 'single-shot');
-  const ralphDir = path.join(workspaceWorkflowsDir(resolved), 'ralph-loop');
+  const singleDir = path.join(wsDir(resolved, 'workflows'), 'single-shot');
+  const ralphDir = path.join(wsDir(resolved, 'workflows'), 'ralph-loop');
   if (!fs.existsSync(path.join(singleDir, 'WORKFLOW.md'))) {
     writeFile(
       path.join(singleDir, 'WORKFLOW.md'),
@@ -231,8 +257,9 @@ function scanAgentsDir(dir: string, source: 'global' | 'workspace'): AgentConfig
 }
 
 export function listAgents(workspacePath?: string): AgentConfig[] {
-  const global = scanAgentsDir(GLOBAL_AGENTS_DIR, 'global');
-  const wsAgents = workspacePath ? scanAgentsDir(workspaceAgentsDir(expandHome(workspacePath)), 'workspace') : [];
+  const settings = getPathSettings();
+  const global = scanAgentsDir(resolveGlobalPath(settings, 'globalAgents'), 'global');
+  const wsAgents = workspacePath ? scanAgentsDir(wsDir(workspacePath, 'agents'), 'workspace') : [];
   const byId = new Map<string, AgentConfig>();
   global.forEach(a => byId.set(a.id, a));
   wsAgents.forEach(a => byId.set(a.id, a)); // workspace overrides global
@@ -244,9 +271,9 @@ export function getAgent(id: string, workspacePath?: string): AgentConfig | null
 }
 
 export function getAgentFilePath(id: string, source: 'global' | 'workspace', workspacePath?: string): string {
-  if (source === 'global') return path.join(GLOBAL_AGENTS_DIR, `${id}.md`);
+  if (source === 'global') return path.join(resolveGlobalPath(getPathSettings(), 'globalAgents'), `${id}.md`);
   if (!workspacePath) throw new Error('workspace path required for workspace agents');
-  return path.join(workspaceAgentsDir(expandHome(workspacePath)), `${id}.md`);
+  return path.join(wsDir(workspacePath, 'agents'), `${id}.md`);
 }
 
 export function saveAgent(agent: AgentConfig, workspacePath?: string): void {
@@ -284,9 +311,9 @@ export function getAgentMemoryPath(
   source: 'global' | 'workspace',
   workspacePath?: string
 ): string {
-  if (source === 'global') return path.join(GLOBAL_AGENTS_DIR, `${agentId}.memory.md`);
+  if (source === 'global') return path.join(resolveGlobalPath(getPathSettings(), 'globalAgents'), `${agentId}.memory.md`);
   if (!workspacePath) throw new Error('workspace path required');
-  return path.join(workspaceAgentsDir(expandHome(workspacePath)), `${agentId}.memory.md`);
+  return path.join(wsDir(workspacePath, 'agents'), `${agentId}.memory.md`);
 }
 
 // ─── Skills ──────────────────────────────────────────────────────────────────
@@ -318,8 +345,8 @@ function listSkillsFromDir(skillsDir: string, source: 'global' | 'workspace'): S
 }
 
 export function listSkills(workspacePath?: string): SkillConfig[] {
-  const global = listSkillsFromDir(GLOBAL_SKILLS_DIR, 'global');
-  const ws = workspacePath ? listSkillsFromDir(workspaceSkillsDir(expandHome(workspacePath)), 'workspace') : [];
+  const global = listSkillsFromDir(resolveGlobalPath(getPathSettings(), 'globalSkills'), 'global');
+  const ws = workspacePath ? listSkillsFromDir(wsDir(workspacePath, 'skills'), 'workspace') : [];
   const byId = new Map<string, SkillConfig>();
   global.forEach(s => byId.set(s.id, s));
   ws.forEach(s => byId.set(s.id, s));
@@ -332,6 +359,32 @@ export function getSkillContent(skillIds: string[], workspacePath?: string): str
     .map(id => skills.find(s => s.id === id)?.content ?? '')
     .filter(Boolean)
     .join('\n\n---\n\n');
+}
+
+/** Instruct Claude to invoke skills via the Skill tool (not inline paste). */
+export function buildSkillInvocationPrompt(skillIds: string[], workspacePath?: string): string {
+  if (skillIds.length === 0) return '';
+  const skills = listSkills(workspacePath);
+  const lines = skillIds
+    .map(id => skills.find(s => s.id === id))
+    .filter((s): s is SkillConfig => !!s)
+    .map(s => `- \`${s.id}\` (${s.name})`);
+  if (lines.length === 0) return '';
+
+  return `## Required skills (invoke via Skill tool)
+
+**First step:** use the **Skill** tool to invoke each skill below. Do not skip this — do not substitute by reading SKILL.md yourself or relying on pasted skill text.
+
+${lines.join('\n')}
+
+After all skills are loaded, follow their instructions for the rest of this run.`;
+}
+
+/** Skill tool must be allowed when tasks reference skills. */
+export function ensureSkillToolAllowed(tools: string[]): string[] {
+  if (tools.length === 0) return tools;
+  const hasSkill = tools.some(t => t.toLowerCase() === 'skill');
+  return hasSkill ? tools : [...tools, 'Skill'];
 }
 
 // ─── Workflows ───────────────────────────────────────────────────────────────
@@ -353,7 +406,7 @@ function parseWorkflowDir(workflowDir: string): WorkflowConfig | null {
 }
 
 export function listWorkflows(workspacePath: string): WorkflowConfig[] {
-  const dir = workspaceWorkflowsDir(expandHome(workspacePath));
+  const dir = wsDir(workspacePath, 'workflows');
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir, { withFileTypes: true })
@@ -367,7 +420,7 @@ export function getWorkflow(id: string, workspacePath: string): WorkflowConfig |
 }
 
 export function saveWorkflow(workflow: WorkflowConfig, workspacePath: string): void {
-  const dir = path.join(workspaceWorkflowsDir(expandHome(workspacePath)), workflow.id);
+  const dir = path.join(wsDir(workspacePath, 'workflows'), workflow.id);
   ensureDir(dir);
   const meta: Record<string, unknown> = {
     name: workflow.name,
@@ -379,18 +432,18 @@ export function saveWorkflow(workflow: WorkflowConfig, workspacePath: string): v
 }
 
 export function deleteWorkflow(id: string, workspacePath: string): void {
-  const dir = path.join(workspaceWorkflowsDir(expandHome(workspacePath)), id);
+  const dir = path.join(wsDir(workspacePath, 'workflows'), id);
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
-function taskDir(workspacePath: string, taskId: string): string {
-  return path.join(workspaceTasksDir(expandHome(workspacePath)), taskId);
+export function taskDir(workspacePath: string, taskId: string): string {
+  return path.join(wsDir(workspacePath, 'tasks'), taskId);
 }
 
 export function listTasks(workspacePath: string): TaskConfig[] {
-  const dir = workspaceTasksDir(expandHome(workspacePath));
+  const dir = wsDir(workspacePath, 'tasks');
   if (!fs.existsSync(dir)) return [];
   const tasks: TaskConfig[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -405,7 +458,17 @@ export function getTask(id: string, workspacePath: string): TaskConfig | null {
   const jsonPath = path.join(taskDir(workspacePath, id), 'task.json');
   if (!fs.existsSync(jsonPath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(jsonPath, 'utf-8')) as TaskConfig;
+    const task = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')) as TaskConfig;
+    const mdStatus = readTaskStatusFromMarkdown(workspacePath, id);
+    if (mdStatus) {
+      if (mdStatus !== task.status) {
+        task.status = mdStatus;
+        saveTask(task, workspacePath);
+      }
+    } else {
+      ensureTaskMarkdown(task, workspacePath);
+    }
+    return task;
   } catch {
     return null;
   }
@@ -415,6 +478,7 @@ export function saveTask(task: TaskConfig, workspacePath: string): void {
   const dir = taskDir(workspacePath, task.id);
   ensureDir(dir);
   fs.writeFileSync(path.join(dir, 'task.json'), JSON.stringify(task, null, 2), 'utf-8');
+  writeTaskMarkdown(task, workspacePath);
 }
 
 export function deleteTask(id: string, workspacePath: string): void {
@@ -465,15 +529,23 @@ export function appendTaskProgress(
 export function createTask(
   data: {
     title: string;
-    agent: string;
-    workflow: string;
+    agent?: string;
+    workflow?: string;
     skills?: string[];
     description?: string;
     type?: TaskType;
+    prd?: string;
+    taskType?: string;
   },
   workspacePath: string
 ): TaskConfig {
-  const workflow = getWorkflow(data.workflow, workspacePath);
+  const resolved = resolveTaskTypeFields(workspacePath, {
+    taskType: data.taskType,
+    agent: data.agent,
+    workflow: data.workflow,
+    skills: data.skills,
+  });
+  const workflow = getWorkflow(resolved.workflow, workspacePath);
   const type: TaskType = data.type ?? (workflow?.type === 'loop' ? 'project' : 'simple');
   const now = new Date().toISOString();
   const taskNum = Date.now().toString(36).toUpperCase().slice(-4);
@@ -482,11 +554,13 @@ export function createTask(
   const task: TaskConfig = {
     id,
     title: data.title,
-    agent: data.agent,
-    workflow: data.workflow,
-    status: type === 'project' ? 'todo' : 'todo',
+    agent: resolved.agent,
+    workflow: resolved.workflow,
+    status: 'todo',
     type,
-    skills: data.skills ?? [],
+    skills: resolved.skills,
+    ...(resolved.taskType ? { taskType: resolved.taskType } : {}),
+    ...(data.prd ? { prd: data.prd } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -495,13 +569,12 @@ export function createTask(
   ensureDir(dir);
   saveTask(task, workspacePath);
 
-  if (type === 'simple' && data.description) {
-    saveTaskPrompt(id, workspacePath, data.description);
-  } else if (data.description) {
+  if (data.description) {
     saveTaskPrompt(id, workspacePath, data.description);
   }
 
   writeFile(path.join(dir, 'progress.txt'), `# Progress — ${data.title}\n\n`);
+  writeTaskMarkdown(task, workspacePath);
   return task;
 }
 

@@ -1,11 +1,22 @@
 import { Router, Request, Response } from 'express';
-import { getConfig, saveConfig, setActiveWorkspace } from '../services/fileStore';
+import { getConfig, saveConfig, setActiveWorkspace, getPathSettings, savePathSettings } from '../services/fileStore';
 
 const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
   try {
-    res.json(getConfig());
+    const config = getConfig();
+    res.json({ ...config, pathSettings: getPathSettings() });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.put('/paths', (req: Request, res: Response) => {
+  try {
+    const body = req.body as Record<string, string>;
+    const pathSettings = savePathSettings(body);
+    res.json({ pathSettings });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

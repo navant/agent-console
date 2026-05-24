@@ -15,11 +15,14 @@ import {
   getAgent,
   getAgentSoulPath,
   buildMemoryContext,
-  getSkillContent,
   getWorkflow,
 } from '../services/fileStore';
+import { resolveTaskTypeFields } from '../services/taskTypesStore';
 import { PlanConfig, TaskConfig, UserStory } from '../types';
 import { renderWorkflowTemplate } from '../services/workflowRenderer';
+import { addTaskComment, getTaskComments } from '../services/taskComments';
+import { onTaskCommentAdded } from '../services/taskQueue';
+import { mergeTaskFromMarkdownContent, readTaskMarkdown } from '../services/taskMarkdown';
 
 let broadcast: ((msg: unknown) => void) | null = null;
 
@@ -75,17 +78,28 @@ router.post('/', (req: Request, res: Response) => {
       workflow?: string;
       skills?: string[];
       description?: string;
+      prd?: string;
+      taskType?: string;
     };
     if (!body.title) return res.status(400).json({ error: 'title is required' });
-    if (!body.workflow) return res.status(400).json({ error: 'workflow is required' });
+
+    const resolved = resolveTaskTypeFields(wsPath, {
+      taskType: body.taskType,
+      agent: body.agent,
+      workflow: body.workflow,
+      skills: body.skills,
+    });
+    if (!resolved.workflow) return res.status(400).json({ error: 'workflow is required' });
 
     const task = createTask(
       {
         title: body.title,
-        agent: body.agent ?? '',
-        workflow: body.workflow,
-        skills: body.skills,
+        agent: resolved.agent,
+        workflow: resolved.workflow,
+        skills: resolved.skills,
         description: body.description,
+        prd: body.prd,
+        taskType: resolved.taskType,
       },
       wsPath
     );
@@ -105,12 +119,24 @@ router.put('/:id', (req: Request, res: Response) => {
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const body = req.body as Partial<TaskConfig> & { description?: string };
+    const resolved = resolveTaskTypeFields(wsPath, {
+      taskType: 'taskType' in body ? (body.taskType || undefined) : existing.taskType,
+      agent: body.agent ?? existing.agent,
+      workflow: body.workflow ?? existing.workflow,
+      skills: body.skills ?? existing.skills,
+    });
+
     const updated: TaskConfig = {
       ...existing,
       ...body,
+      agent: resolved.agent,
+      workflow: resolved.workflow,
+      skills: resolved.skills,
       id: req.params.id,
       updatedAt: new Date().toISOString(),
     };
+    if (resolved.taskType) updated.taskType = resolved.taskType;
+    else delete updated.taskType;
 
     saveTask(updated, wsPath);
     if (body.description !== undefined) {
@@ -153,6 +179,12 @@ router.post('/:id/reject', (req: Request, res: Response) => {
     task.status = 'todo';
     task.updatedAt = new Date().toISOString();
     saveTask(task, wsPath);
+    addTaskComment(wsPath, req.params.id, {
+      author: 'system',
+      authorName: 'System',
+      kind: 'activity',
+      body: 'Task returned to todo',
+    });
     if (broadcast) broadcast({ type: 'task_update', task });
     res.json(task);
   } catch (err) {
@@ -280,6 +312,84 @@ router.get('/:id/progress', (req: Request, res: Response) => {
     const wsPath = requireWorkspace(res);
     if (!wsPath) return;
     res.json({ content: getTaskProgress(req.params.id, wsPath) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get('/:id/markdown', (req: Request, res: Response) => {
+  try {
+    const wsPath = requireWorkspace(res);
+    if (!wsPath) return;
+    const task = getTask(req.params.id, wsPath);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    res.json({ content: readTaskMarkdown(wsPath, req.params.id) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.put('/:id/markdown', (req: Request, res: Response) => {
+  try {
+    const wsPath = requireWorkspace(res);
+    if (!wsPath) return;
+    const existing = getTask(req.params.id, wsPath);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const content = typeof req.body?.content === 'string' ? req.body.content : '';
+    const updated = mergeTaskFromMarkdownContent(content, existing);
+    if (!updated) {
+      return res.status(400).json({ error: 'Invalid task.md — status frontmatter is required' });
+    }
+
+    saveTask(updated, wsPath);
+    if (broadcast) broadcast({ type: 'task_update', task: updated });
+    res.json({ task: updated, content: readTaskMarkdown(wsPath, req.params.id) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get('/:id/comments', (req: Request, res: Response) => {
+  try {
+    const wsPath = requireWorkspace(res);
+    if (!wsPath) return;
+    const task = getTask(req.params.id, wsPath);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    res.json({ comments: getTaskComments(wsPath, req.params.id) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.post('/:id/comments', (req: Request, res: Response) => {
+  try {
+    const wsPath = requireWorkspace(res);
+    if (!wsPath) return;
+    const task = getTask(req.params.id, wsPath);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    const body = req.body as { text?: string; authorName?: string };
+    const text = body.text?.trim();
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const comment = addTaskComment(wsPath, req.params.id, {
+      author: 'user',
+      authorName: body.authorName?.trim() || 'You',
+      kind: 'comment',
+      body: text,
+    });
+
+    if (task.status === 'awaiting_confirmation' || task.status === 'review' || task.status === 'done') {
+      task.status = 'todo';
+      task.updatedAt = new Date().toISOString();
+      saveTask(task, wsPath);
+      if (broadcast) broadcast({ type: 'task_update', task });
+    }
+
+    if (broadcast) broadcast({ type: 'comment_append', taskId: req.params.id, comment });
+    onTaskCommentAdded(req.params.id);
+    res.status(201).json(comment);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

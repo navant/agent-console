@@ -2,17 +2,14 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../../store/useStore';
 import { getMemory, getMemoryFile, saveMemoryFile } from '../../api/client';
 import { MemoryFileEntry } from '../../types';
-
-function scopeLabel(scope: MemoryFileEntry['scope']): string {
-  if (scope === 'wiki') return 'wiki';
-  if (scope === 'agent') return 'agent';
-  return 'workspace';
-}
+import MarkdownEditor from '../common/MarkdownEditor';
+import { DEFAULT_PATH_SETTINGS } from '../../constants/paths';
 
 export default function MemoryView() {
   const memory = useStore(s => s.memory);
   const setMemory = useStore(s => s.setMemory);
   const activeWorkspaceId = useStore(s => s.activeWorkspaceId);
+  const pathSettings = useStore(s => s.pathSettings);
 
   const [files, setFiles] = useState<MemoryFileEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -86,7 +83,8 @@ export default function MemoryView() {
         <div>
           <h2>Memory</h2>
           <p className="muted">
-            Tier: {memory?.tier ?? 'simple'} · files under <span className="mono">.claude/</span>
+            Tier: {memory?.tier ?? 'simple'} · files under{' '}
+            <span className="mono">{pathSettings?.memory ?? DEFAULT_PATH_SETTINGS.memory}</span>
           </p>
         </div>
       </header>
@@ -135,26 +133,14 @@ export default function MemoryView() {
 
         <div className="memory-editor">
           {selectedPath ? (
-            <>
-              <div className="memory-editor-hd">
-                <span className="mono">{selectedPath}</span>
-                <span className="source-chip">{scopeLabel(
-                  files.find(f => f.path === selectedPath)?.scope ?? 'workspace'
-                )}</span>
-                <button className="btn btn-primary btn-sm" onClick={save} disabled={saving || loading}>
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-              </div>
-              {loading ? (
-                <p className="muted memory-editor-loading">Loading…</p>
-              ) : (
-                <textarea
-                  className="text mono memory-editor-area"
-                  value={content}
-                  onChange={e => setContent(e.target.value)}
-                />
-              )}
-            </>
+            <MarkdownEditor
+              path={selectedPath}
+              content={content}
+              onChange={setContent}
+              onSave={save}
+              saving={saving}
+              loading={loading}
+            />
           ) : (
             <div className="memory-editor-empty">
               <p>Select a memory file from the tree</p>

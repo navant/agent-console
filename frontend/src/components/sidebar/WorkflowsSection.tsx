@@ -17,9 +17,11 @@ export default function WorkflowsSection({ panel }: { panel?: boolean }) {
       )}
       {workflows.map(wf => (
         <button key={wf.id} className="side-row side-row--quiet">
-          <span className="skill-glyph">{wf.type === 'loop' ? '↻' : '→'}</span>
+          <span className="skill-glyph">→</span>
           <span className="side-row-name">{wf.name}</span>
-          <span className="side-row-meta side-row-meta--faint">{wf.type}</span>
+          <span className="side-row-meta side-row-meta--faint">
+            {wf.agent || wf.skills?.length ? [wf.agent, ...(wf.skills ?? [])].filter(Boolean).join(' · ') : wf.id}
+          </span>
         </button>
       ))}
     </>

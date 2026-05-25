@@ -70,7 +70,7 @@ export default function InvokeGoalModal({
       }
     } else {
       setAgentId('');
-      setWorkflowId(workflows[0]?.id || 'single-shot');
+      setWorkflowId(workflows.find(w => w.id === 'single-shot')?.id ?? workflows[0]?.id ?? 'single-shot');
       setSkillIds([]);
     }
     setSkillSearch('');

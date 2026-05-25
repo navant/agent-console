@@ -56,19 +56,36 @@ export function hasPendingUserFeedback(comments: TaskComment[]): boolean {
   return false;
 }
 
+function commentsForPrompt(comments: TaskComment[]): TaskComment[] {
+  const dialogue = comments.filter(c => c.kind === 'comment');
+  const activity = comments.filter(c => c.kind === 'activity');
+
+  const runNoise = /^Run (started|failed)/i;
+  const toolExitNoise =
+    /Agent (exited quickly|finished without using tools)/i;
+  const usefulActivity = activity.filter(
+    c => !runNoise.test(c.body) && !toolExitNoise.test(c.body)
+  );
+  const lastRunNote = activity.filter(c => runNoise.test(c.body)).slice(-1);
+
+  const merged = [...dialogue, ...usefulActivity, ...lastRunNote];
+  merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return merged.slice(-12);
+}
+
 export function formatCommentsForPrompt(
   comments: TaskComment[],
   options?: { nudge?: boolean; maxComments?: number }
 ): string {
   if (comments.length === 0) return '';
 
-  const max = options?.maxComments ?? 30;
-  const slice = comments.slice(-max);
+  const slice = commentsForPrompt(comments).slice(-(options?.maxComments ?? 12));
 
   const lines = slice.map(c => {
     const name = c.authorName ?? (c.author === 'user' ? 'User' : c.author === 'agent' ? 'Agent' : 'System');
     if (c.kind === 'activity') return `- [activity · ${name}] ${c.body}`;
-    return `- [${name}] ${c.body}`;
+    const body = c.body.length > 2000 ? `${c.body.slice(0, 2000)}…` : c.body;
+    return `- [${name}] ${body}`;
   });
 
   let header = '## Task discussion (comments thread)\n\nReview these comments — especially the latest user messages — and continue the work accordingly.\n\n';
@@ -90,8 +107,16 @@ function isTrivialAgentResponse(body: string): boolean {
     'awaiting confirmation',
     'finished',
     'all done',
+    'no response requested',
   ];
   return phrases.some(p => t === p || t.startsWith(p + ' ') || t.endsWith(' ' + p));
+}
+
+/** True when the agent produced a real reply (tools or non-empty text). */
+export function runHadSubstantiveOutput(toolUseCount: number, agentText: string): boolean {
+  const body = agentText.trim();
+  if (toolUseCount > 0) return true;
+  return body.length > 0 && !isTrivialAgentResponse(body);
 }
 
 export type CommentBroadcast = (comment: TaskComment) => void;
@@ -121,13 +146,8 @@ export function createRunCommentTracker(
   };
 
   return {
-    onRunStart(nudge?: boolean) {
-      persist({
-        author: 'system',
-        authorName: 'System',
-        kind: 'activity',
-        body: nudge ? 'Agent nudged to continue' : 'Run started',
-      });
+    onRunStart(_nudge?: boolean) {
+      // Omit "Run started" — it flooded the prompt when auto-queue retried failed tasks.
     },
 
     onMessage(msg: { type: string; content?: string; tool?: string; result?: string }) {
@@ -140,12 +160,6 @@ export function createRunCommentTracker(
         }
       } else if (msg.type === 'tool_use' && msg.tool) {
         toolUseCount++;
-        persist({
-          author: 'agent',
-          authorName: agentName,
-          kind: 'activity',
-          body: `Used tool: ${msg.tool}`,
-        });
       }
     },
 
@@ -154,7 +168,8 @@ export function createRunCommentTracker(
       let body = result?.trim() || textBuffer.trim();
       if (isTrivialAgentResponse(body)) body = '';
 
-      const substantive = toolUseCount > 0 || (body.length > 80 && !isTrivialAgentResponse(body));
+      const substantive = runHadSubstantiveOutput(toolUseCount, body);
+      const emptyRun = toolUseCount === 0 && body.length === 0;
 
       if (substantive && body) {
         persist({
@@ -163,15 +178,15 @@ export function createRunCommentTracker(
           kind: 'comment',
           body,
         });
-      } else if (toolUseCount === 0) {
+      } else if (emptyRun) {
         persist({
           author: 'system',
           authorName: 'System',
           kind: 'activity',
           body:
             durationMs < 8000
-              ? 'Agent exited quickly without running tools — session may be stale or Claude CLI needs auth. Try Run (manual) or add a new comment.'
-              : 'Agent finished without using tools — no substantive work detected.',
+              ? 'Agent exited quickly without output — session may be stale or Claude CLI needs auth. Try Run again.'
+              : 'Agent finished without output or tools.',
         });
       }
       textBuffer = '';
@@ -180,12 +195,18 @@ export function createRunCommentTracker(
     },
 
     onError(message: string) {
-      persist({
-        author: 'system',
-        authorName: 'System',
-        kind: 'activity',
-        body: `Run failed: ${message}`,
-      });
+      const comments = getTaskComments(workspacePath, taskId);
+      const last = comments[comments.length - 1];
+      const same =
+        last?.kind === 'activity' && last.body === `Run failed: ${message}`;
+      if (!same) {
+        persist({
+          author: 'system',
+          authorName: 'System',
+          kind: 'activity',
+          body: `Run failed: ${message}`,
+        });
+      }
       textBuffer = '';
     },
 

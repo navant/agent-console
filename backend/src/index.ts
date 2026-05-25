@@ -29,12 +29,27 @@ import {
   tick,
   getAutomationState,
 } from './services/taskQueue';
-import { runSlashCommand, stopRalph } from './services/ptyRunner';
+import { runSlashCommand } from './services/ptyRunner';
 import { runClaude } from './services/claudeRunner';
 
 const PORT = 3001;
 
 const app = express();
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 app.use(express.json());
 
 app.use('/api/config', configRouter);
@@ -84,7 +99,7 @@ function sendTo(ws: WebSocket, msg: WSServerMessage): void {
 wss.on('connection', (ws: WebSocket) => {
   clients.add(ws);
 
-  sendTo(ws, { type: 'automation_state', ...getAutomationState() });
+  sendTo(ws, { type: 'automation_state', autoQueue: getAutomationState().autoQueue });
 
   ws.on('message', (raw: Buffer) => {
     let msg: WSClientMessage;
@@ -108,14 +123,13 @@ wss.on('connection', (ws: WebSocket) => {
           .catch(() => {});
       } else if (msg.type === 'auto_queue_start') {
         setAutoQueue(true);
-        broadcast({ type: 'automation_state', ...getAutomationState() });
+        broadcast({ type: 'automation_state', autoQueue: true });
         void tick();
       } else if (msg.type === 'auto_queue_stop') {
         setAutoQueue(false);
-        broadcast({ type: 'automation_state', ...getAutomationState() });
+        broadcast({ type: 'automation_state', autoQueue: false });
       } else if (msg.type === 'stop') {
         stopTaskRunner();
-        stopRalph();
         sendTo(ws, { type: 'done', result: 'stopped' });
       } else if (msg.type === 'slash_command') {
         const activeWs = getActiveWorkspace();

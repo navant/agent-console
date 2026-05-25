@@ -232,7 +232,14 @@ export const useStore = create<Store>((set, get) => ({
         getMemory().catch(() => null),
         getTaskTypes().catch(() => ({ types: [] as TaskTypeDef[] })),
       ]);
-      set({ agents, tasks, skills, workflows, memory, taskTypes: taskTypesRes.types });
+      set({
+        agents,
+        tasks,
+        skills,
+        workflows,
+        memory,
+        taskTypes: taskTypesRes.types,
+      });
     } catch (err) {
       console.error('Failed to load workspace data:', err);
     }

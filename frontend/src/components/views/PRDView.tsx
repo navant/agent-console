@@ -6,10 +6,10 @@ import {
   savePrdFile,
   deletePrdFile,
   createPrd,
+  createTask,
 } from '../../api/client';
 import { PrdFile } from '../../types';
 import MarkdownEditor from '../common/MarkdownEditor';
-import ImplementPrdModal from './ImplementPrdModal';
 import { DEFAULT_PATH_SETTINGS } from '../../constants/paths';
 
 export default function PRDView() {
@@ -17,6 +17,9 @@ export default function PRDView() {
   const pendingPrdPath = useStore(s => s.pendingPrdPath);
   const clearPendingPrdPath = useStore(s => s.clearPendingPrdPath);
   const pathSettings = useStore(s => s.pathSettings);
+  const addTask = useStore(s => s.addTask);
+  const openTaskTab = useStore(s => s.openTaskTab);
+  const loadWorkspaceData = useStore(s => s.loadWorkspaceData);
 
   const [files, setFiles] = useState<PrdFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -24,7 +27,7 @@ export default function PRDView() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [showImplement, setShowImplement] = useState(false);
+  const [expanding, setExpanding] = useState(false);
 
   const loadList = () => {
     if (!activeWorkspaceId) return;
@@ -74,33 +77,43 @@ export default function PRDView() {
       loadList();
       openFile(file.path);
     } catch (err) {
-      console.error('Failed to create PRD:', err);
       window.alert(`Failed to create PRD: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  const implement = () => {
+  const expandWithPrdSkill = async () => {
     if (!selected) return;
-    setShowImplement(true);
+    setExpanding(true);
+    try {
+      const task = await createTask({
+        title: `Expand PRD: ${selected.split('/').pop()}`,
+        workflow: 'single-shot',
+        skills: ['prd'],
+        prd: selected,
+        description:
+          'Use the **prd** skill to interview, explore the codebase if needed, and expand this PRD into a full spec. Save updates to the linked PRD file under .claude/prd/. Do not implement code yet.',
+      });
+      addTask(task);
+      await loadWorkspaceData();
+      openTaskTab(task.id);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExpanding(false);
+    }
   };
 
   const removePrd = async () => {
     if (!selected) return;
     const name = selected.split('/').pop() ?? selected;
-    if (
-      !window.confirm(
-        `Delete "${name}"?\n\nThis removes the file from disk. Tasks that link to this PRD will keep their link but the file will be gone.`
-      )
-    ) {
-      return;
-    }
+    if (!window.confirm(`Delete "${name}"?`)) return;
     try {
       await deletePrdFile(selected);
       setSelected(null);
       setContent('');
       loadList();
     } catch (err) {
-      window.alert(`Failed to delete PRD: ${err instanceof Error ? err.message : String(err)}`);
+      window.alert(`Failed to delete: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -117,9 +130,12 @@ export default function PRDView() {
       <header className="panel-view-hd">
         <div>
           <h2>Planning</h2>
-          <p className="muted">PRD specs in <span className="mono">{pathSettings?.prd ?? DEFAULT_PATH_SETTINGS.prd}</span></p>
+          <p className="muted">
+            PRD markdown in <span className="mono">{pathSettings?.prd ?? DEFAULT_PATH_SETTINGS.prd}</span>.
+            Use <strong>Expand with PRD skill</strong> to deepen a spec (creates a task that invokes the prd skill).
+          </p>
         </div>
-        <button type="button" className="btn btn-primary btn-sm" onClick={newPrd}>+ New plan</button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={newPrd}>+ New PRD</button>
       </header>
 
       <div className="prd-view-body">
@@ -139,17 +155,19 @@ export default function PRDView() {
               <span className="memory-tree-name mono">{f.name}</span>
             </button>
           ))}
-          {filtered.length === 0 && (
-            <p className="field-hint" style={{ padding: 8 }}>No PRD files — create one or add .md files to the prd folder.</p>
-          )}
         </aside>
 
         <div className="prd-editor-pane">
           {selected ? (
             <>
               <div className="prd-editor-actions">
-                <button type="button" className="btn btn-primary btn-sm" onClick={implement}>
-                  ▶ Implement as task
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => void expandWithPrdSkill()}
+                  disabled={expanding}
+                >
+                  {expanding ? 'Creating task…' : 'Expand with PRD skill'}
                 </button>
                 <button type="button" className="btn btn-sm danger" onClick={removePrd}>
                   Delete PRD
@@ -166,21 +184,12 @@ export default function PRDView() {
             </>
           ) : (
             <div className="memory-editor-empty">
-              <p>Select a PRD or create a new one</p>
-              <p className="muted">PRDs are markdown specs. Use “Implement as task” when you are ready to run one.</p>
+              <p>Select or create a PRD</p>
+              <p className="muted">Run the task with the prd skill, or pick an Archon workflow on a kanban card for multi-step execution.</p>
             </div>
           )}
         </div>
       </div>
-
-      {selected && (
-        <ImplementPrdModal
-          open={showImplement}
-          prdPath={selected}
-          prdContent={content}
-          onClose={() => setShowImplement(false)}
-        />
-      )}
     </div>
   );
 }

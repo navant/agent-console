@@ -4,7 +4,6 @@ import {
   createPrdFile,
   deletePrdFile,
   getPrdContent,
-  implementPrdAsTask,
   listPrdFiles,
   savePrdContent,
 } from '../services/prdStore';
@@ -78,33 +77,6 @@ router.post('/', (req: Request, res: Response) => {
     if (!filename) return res.status(400).json({ error: 'filename is required' });
     const file = createPrdFile(wsPath, filename, content);
     res.status(201).json(file);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-router.post('/implement', (req: Request, res: Response) => {
-  try {
-    const wsPath = requireWorkspace(res);
-    if (!wsPath) return;
-    const body = req.body as {
-      prdPath?: string;
-      agent?: string;
-      workflow?: string;
-      skills?: string[];
-      title?: string;
-      taskType?: string;
-    };
-    if (!body.prdPath) return res.status(400).json({ error: 'prdPath is required' });
-    const task = implementPrdAsTask(wsPath, {
-      prdPath: body.prdPath,
-      agent: body.agent,
-      workflow: body.workflow,
-      skills: body.skills,
-      title: body.title,
-      taskType: body.taskType,
-    });
-    res.status(201).json(task);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

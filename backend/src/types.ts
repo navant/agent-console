@@ -79,6 +79,9 @@ export interface TaskConfig {
   skills: string[];
   taskType?: string;
   prd?: string;
+  /** Story id from PRD plan (one kanban task per story) */
+  storyId?: string;
+  storyPriority?: number;
   goal?: string;
   session_id?: string;
   createdAt: string;
@@ -95,11 +98,16 @@ export interface SkillConfig {
 export interface WorkflowConfig {
   id: string;
   name: string;
-  type: 'loop' | 'single';
+  description?: string;
+  type: 'single' | 'loop';
   max_iterations?: number;
   commit_on_story?: boolean;
+  agent?: string;
+  skills: string[];
+  task_type?: string;
   template: string;
-  source: 'global' | 'workspace';
+  /** builtin = single-shot / ralph-loop; archon = from `archon workflow list`; global/workspace = WORKFLOW.md folders */
+  source: 'global' | 'workspace' | 'builtin' | 'archon';
 }
 
 export interface UserStory {
@@ -109,9 +117,12 @@ export interface UserStory {
   acceptanceCriteria: string[];
   priority: number;
   passes: boolean;
+  /** Kanban task id when spawned from PRD plan */
+  taskId?: string;
 }
 
 export interface PlanConfig {
+  prdPath?: string;
   userStories: UserStory[];
 }
 
@@ -139,13 +150,18 @@ export interface MemoryFile {
   updatedAt?: string;
 }
 
+export type MemoryFileKind = 'editable' | 'generated' | 'folder' | 'wiki' | 'agent';
+
 export interface MemoryFileEntry {
   id: string;
   name: string;
   path: string;
   scope: 'workspace' | 'agent' | 'wiki';
+  kind?: MemoryFileKind;
+  description?: string;
   agentId?: string;
   isDir?: boolean;
+  readOnly?: boolean;
   children?: MemoryFileEntry[];
 }
 
@@ -169,8 +185,7 @@ export type WSServerMessage =
   | { type: 'task_update'; task: TaskConfig }
   | { type: 'progress_append'; taskId: string; line: string }
   | { type: 'comment_append'; taskId: string; comment: TaskComment }
-  | { type: 'automation_state'; autoQueue: boolean }
-  | { type: 'story_complete'; taskId: string; storyId: string };
+  | { type: 'automation_state'; autoQueue: boolean };
 
 export type WSClientMessage =
   | { type: 'run_task'; taskId: string; nudge?: boolean }

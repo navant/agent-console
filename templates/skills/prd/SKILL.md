@@ -16,7 +16,7 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 3. Ask 3-any number of essential clarifying questions (informed by exploration if applicable)
 4. Interview me in detail using AskUserQuestionTool about literally anything: technical implementation, UI/UX, concerns, tradeoffs etc.
 4. Generate a structured PRD based on answers
-5. Save to `tasks/prd-[feature-name].md`
+5. Save to `.claude/prd/[feature-name].md` (workspace PRD folder used by Agent Console Planning)
 
 **Important:** Do NOT start implementing. Just create the PRD.
 

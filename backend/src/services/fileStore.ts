@@ -35,7 +35,9 @@ import {
   workspaceSkillsDir,
   workspaceWorkflowsDir,
   workspaceTasksDir,
-  workspaceMemoryPath,
+  sessionMemoryPath,
+  SESSION_MEMORY_FILENAME,
+  CODEGRAPH_SUMMARY_FILENAME,
 } from '../config';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -186,41 +188,6 @@ function ensureWorkspaceStructure(workspacePath: string): void {
     wsDir(resolved, 'memory'),
   ];
   dirs.forEach(d => ensureDir(d));
-
-  const memPath = workspaceMemoryPath(resolved);
-  if (!fs.existsSync(memPath)) {
-    writeFile(memPath, '# Workspace Memory\n\n_Context shared across all tasks in this workspace._\n');
-  }
-
-  // Seed default workflows if missing
-  const singleDir = path.join(wsDir(resolved, 'workflows'), 'single-shot');
-  const ralphDir = path.join(wsDir(resolved, 'workflows'), 'ralph-loop');
-  if (!fs.existsSync(path.join(singleDir, 'WORKFLOW.md'))) {
-    writeFile(
-      path.join(singleDir, 'WORKFLOW.md'),
-      buildFrontmatter(
-        { name: 'single-shot', type: 'single' },
-        '{{prompt}}\n\nWorkspace memory:\n{{memory}}'
-      )
-    );
-  }
-  if (!fs.existsSync(path.join(ralphDir, 'WORKFLOW.md'))) {
-    writeFile(
-      path.join(ralphDir, 'WORKFLOW.md'),
-      buildFrontmatter(
-        { name: 'ralph-loop', type: 'loop', max_iterations: 20, commit_on_story: true },
-        `You are working on story {{story.id}}: {{story.title}}.
-{{story.description}}
-
-Acceptance criteria:
-{{#each story.acceptanceCriteria}}- {{this}}
-{{/each}}
-
-Workspace memory:
-{{memory}}`
-      )
-    );
-  }
 }
 
 // ─── Agents ──────────────────────────────────────────────────────────────────
@@ -421,21 +388,54 @@ export function ensureSkillToolAllowed(tools: string[]): string[] {
 
 // ─── Workflows ───────────────────────────────────────────────────────────────
 
+function parseSkillsMeta(meta: unknown): string[] {
+  if (Array.isArray(meta)) return meta.map(String).filter(Boolean);
+  if (typeof meta === 'string') {
+    return meta
+      .split(/[\n,]/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function parseWorkflowDir(workflowDir: string, source: 'global' | 'workspace'): WorkflowConfig | null {
   const workflowMd = path.join(workflowDir, 'WORKFLOW.md');
   if (!fs.existsSync(workflowMd)) return null;
   const raw = readFile(workflowMd);
   const { meta, body } = parseFrontmatter(raw);
   const id = path.basename(workflowDir);
+  const wfType = meta.type === 'loop' ? 'loop' : 'single';
   return {
     id,
     name: (meta.name as string) || id,
-    type: (meta.type as 'loop' | 'single') || 'single',
-    max_iterations: meta.max_iterations as number | undefined,
-    commit_on_story: meta.commit_on_story as boolean | undefined,
+    type: wfType,
+    max_iterations: typeof meta.max_iterations === 'number' ? meta.max_iterations : undefined,
+    commit_on_story: meta.commit_on_story === true,
+    agent: typeof meta.agent === 'string' ? meta.agent : '',
+    skills: parseSkillsMeta(meta.skills),
+    task_type: typeof meta.task_type === 'string' ? meta.task_type : undefined,
     template: body,
     source,
   };
+}
+
+/** Merge workflow defaults with explicit overrides (spawn / create task). */
+export function applyWorkflowDefaults(
+  workspacePath: string,
+  workflowId: string,
+  overrides: { agent?: string; skills?: string[]; taskType?: string }
+): { agent: string; skills: string[]; taskType?: string } {
+  const wf = getWorkflow(workflowId, workspacePath);
+  const agent = overrides.agent?.trim() || wf?.agent?.trim() || '';
+  const skills =
+    overrides.skills && overrides.skills.length > 0
+      ? overrides.skills
+      : wf?.skills?.length
+        ? [...wf.skills]
+        : [];
+  const taskType = overrides.taskType?.trim() || wf?.task_type;
+  return { agent, skills, taskType };
 }
 
 function listWorkflowsFromDir(workflowsDir: string, source: 'global' | 'workspace'): WorkflowConfig[] {
@@ -469,10 +469,11 @@ export function saveWorkflow(workflow: WorkflowConfig, workspacePath: string): v
   ensureDir(dir);
   const meta: Record<string, unknown> = {
     name: workflow.name,
-    type: workflow.type,
+    type: 'single',
   };
-  if (workflow.max_iterations !== undefined) meta.max_iterations = workflow.max_iterations;
-  if (workflow.commit_on_story !== undefined) meta.commit_on_story = workflow.commit_on_story;
+  if (workflow.agent) meta.agent = workflow.agent;
+  if (workflow.skills.length > 0) meta.skills = workflow.skills;
+  if (workflow.task_type) meta.task_type = workflow.task_type;
   writeFile(path.join(dir, 'WORKFLOW.md'), buildFrontmatter(meta, workflow.template));
 }
 
@@ -546,7 +547,7 @@ export function createWorkflowFolder(workspacePath: string, id: string, content?
   ensureDir(dir);
   const body =
     content ??
-    `---\nname: ${id}\ntype: single\n---\n\n{{prompt}}\n\nWorkspace memory:\n{{memory}}\n`;
+    `---\nname: ${id}\ntype: single\nagent: ''\nskills: []\n---\n\n# {{task.id}} — {{task.title}}\n\n{{storyDescription}}\n`;
   writeFile(path.join(dir, 'WORKFLOW.md'), body);
 }
 
@@ -647,10 +648,11 @@ export function createTask(
     workflow?: string;
     skills?: string[];
     description?: string;
-    type?: TaskType;
     prd?: string;
     goal?: string;
     taskType?: string;
+    storyId?: string;
+    storyPriority?: number;
   },
   workspacePath: string
 ): TaskConfig {
@@ -660,8 +662,11 @@ export function createTask(
     workflow: data.workflow,
     skills: data.skills,
   });
-  const workflow = getWorkflow(resolved.workflow, workspacePath);
-  const type: TaskType = data.type ?? (workflow?.type === 'loop' ? 'project' : 'simple');
+  const wfMerged = applyWorkflowDefaults(workspacePath, resolved.workflow, {
+    agent: resolved.agent,
+    skills: resolved.skills,
+    taskType: resolved.taskType,
+  });
   const now = new Date().toISOString();
   const taskNum = Date.now().toString(36).toUpperCase().slice(-4);
   const id = `T-${taskNum}`;
@@ -669,14 +674,16 @@ export function createTask(
   const task: TaskConfig = {
     id,
     title: data.title,
-    agent: resolved.agent,
+    agent: wfMerged.agent,
     workflow: resolved.workflow,
     status: 'todo',
-    type,
-    skills: resolved.skills,
-    ...(resolved.taskType ? { taskType: resolved.taskType } : {}),
+    type: 'simple',
+    skills: wfMerged.skills,
+    ...(wfMerged.taskType ? { taskType: wfMerged.taskType } : {}),
     ...(data.prd ? { prd: data.prd } : {}),
     ...(data.goal ? { goal: data.goal } : {}),
+    ...(data.storyId ? { storyId: data.storyId } : {}),
+    ...(data.storyPriority !== undefined ? { storyPriority: data.storyPriority } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -696,12 +703,9 @@ export function createTask(
 
 // ─── Memory ──────────────────────────────────────────────────────────────────
 
-export function getWorkspaceMemory(workspacePath: string): string {
-  return readFile(workspaceMemoryPath(expandHome(workspacePath)));
-}
-
-export function saveWorkspaceMemory(workspacePath: string, content: string): void {
-  writeFile(workspaceMemoryPath(expandHome(workspacePath)), content);
+export function getSessionMemory(workspacePath: string): string {
+  const abs = sessionMemoryPath(expandHome(workspacePath));
+  return fs.existsSync(abs) ? readFile(abs) : '';
 }
 
 export function getAgentMemory(agentId: string, workspacePath?: string): string {
@@ -724,7 +728,8 @@ function scanMemoryDir(
   dir: string,
   relPrefix: string,
   scope: 'workspace' | 'wiki',
-  out: MemoryFileEntry[]
+  out: MemoryFileEntry[],
+  fileKind: MemoryFileEntry['kind'] = 'folder'
 ): void {
   if (!fs.existsSync(dir)) return;
   for (const name of fs.readdirSync(dir).sort()) {
@@ -732,10 +737,26 @@ function scanMemoryDir(
     const rel = relPrefix ? `${relPrefix}/${name}` : name;
     const stat = fs.statSync(full);
     if (stat.isDirectory()) {
-      out.push({ id: `${scope}:${rel}`, name, path: rel, scope, isDir: true });
-      scanMemoryDir(full, rel, scope, out);
+      out.push({
+        id: `${scope}:${rel}`,
+        name,
+        path: rel,
+        scope,
+        isDir: true,
+        kind: fileKind,
+        description: relPrefix === 'memory' ? '.claude/memory/' : undefined,
+      });
+      scanMemoryDir(full, rel, scope, out, fileKind);
     } else if (name.endsWith('.md')) {
-      out.push({ id: `${scope}:${rel}`, name, path: rel, scope });
+      out.push({
+        id: `${scope}:${rel}`,
+        name,
+        path: rel,
+        scope,
+        kind: scope === 'wiki' ? 'wiki' : fileKind,
+        description: relPrefix === 'memory' ? 'Extra file in .claude/memory/' : undefined,
+        readOnly: false,
+      });
     }
   }
 }
@@ -744,13 +765,34 @@ export function listMemoryFiles(workspacePath: string): MemoryFileEntry[] {
   const claude = workspaceClaudeDir(expandHome(workspacePath));
   const files: MemoryFileEntry[] = [];
 
-  const memMd = path.join(claude, 'memory.md');
-  if (fs.existsSync(memMd)) {
-    files.push({ id: 'workspace:memory.md', name: 'memory.md', path: 'memory.md', scope: 'workspace' });
+  const sessionMem = path.join(claude, SESSION_MEMORY_FILENAME);
+  if (fs.existsSync(sessionMem)) {
+    files.push({
+      id: 'workspace:MEMORY.md',
+      name: SESSION_MEMORY_FILENAME,
+      path: SESSION_MEMORY_FILENAME,
+      scope: 'workspace',
+      kind: 'generated',
+      description: 'claude-mem digest — refresh summaries',
+      readOnly: true,
+    });
   }
 
-  scanMemoryDir(path.join(claude, 'memory'), 'memory', 'workspace', files);
-  scanMemoryDir(path.join(claude, 'wiki'), 'wiki', 'wiki', files);
+  const cgSummary = path.join(claude, CODEGRAPH_SUMMARY_FILENAME);
+  if (fs.existsSync(cgSummary)) {
+    files.push({
+      id: 'workspace:codegraph-summary.md',
+      name: CODEGRAPH_SUMMARY_FILENAME,
+      path: CODEGRAPH_SUMMARY_FILENAME,
+      scope: 'workspace',
+      kind: 'generated',
+      description: 'CodeGraph — refresh summaries',
+      readOnly: true,
+    });
+  }
+
+  scanMemoryDir(path.join(claude, 'memory'), 'memory', 'workspace', files, 'folder');
+  scanMemoryDir(path.join(claude, 'wiki'), 'wiki', 'wiki', files, 'wiki');
 
   for (const agent of listAgents(workspacePath)) {
     if (!agent.memory) continue;
@@ -780,7 +822,12 @@ export function resolveMemoryFilePath(
     if (!agent) throw new Error(`Agent ${agentId} not found`);
     return getAgentMemoryPath(agentId, agent.source, workspacePath);
   }
-  if (filePath === 'memory.md') return workspaceMemoryPath(workspacePath);
+  if (filePath === SESSION_MEMORY_FILENAME || filePath === 'memory.md') {
+    return sessionMemoryPath(workspacePath);
+  }
+  if (filePath === CODEGRAPH_SUMMARY_FILENAME) {
+    return path.join(workspaceClaudeDir(expandHome(workspacePath)), filePath);
+  }
   const resolved = path.join(claude, filePath);
   const claudeResolved = path.resolve(claude);
   if (!path.resolve(resolved).startsWith(claudeResolved)) {
@@ -808,18 +855,17 @@ export function writeMemoryFile(
   writeFile(abs, content);
 }
 
-export function getMemoryState(workspacePath: string): MemoryState {
+export async function getMemoryState(workspacePath: string): Promise<MemoryState> {
+  const { probeClaudeMemAvailable } = await import('./memorySetupStore');
   const config = getConfig();
   const tier = config.memoryTier ?? 'simple';
-  const wsMemPath = workspaceMemoryPath(expandHome(workspacePath));
+  const memPath = sessionMemoryPath(expandHome(workspacePath));
   const workspace: MemoryFile = {
     id: 'workspace',
-    name: 'Workspace memory',
-    path: wsMemPath,
-    content: getWorkspaceMemory(workspacePath),
-    updatedAt: fs.existsSync(wsMemPath)
-      ? fs.statSync(wsMemPath).mtime.toISOString()
-      : undefined,
+    name: 'Memory',
+    path: memPath,
+    content: getSessionMemory(workspacePath),
+    updatedAt: fs.existsSync(memPath) ? fs.statSync(memPath).mtime.toISOString() : undefined,
   };
 
   const agents: MemoryFile[] = listAgents(workspacePath)
@@ -840,19 +886,21 @@ export function getMemoryState(workspacePath: string): MemoryState {
     workspace,
     agents,
     files: listMemoryFiles(workspacePath),
-    claudeMemAvailable: false,
+    claudeMemAvailable: await probeClaudeMemAvailable(),
   };
 }
 
-export function buildMemoryContext(workspacePath: string, agentId: string): string {
-  const parts: string[] = [];
-  const wsMem = getWorkspaceMemory(workspacePath).trim();
-  if (wsMem) parts.push(`## Workspace Memory\n\n${wsMem}`);
+function readOptionalClaudeFile(workspacePath: string, filename: string): string {
+  const abs = path.join(workspaceClaudeDir(expandHome(workspacePath)), filename);
+  return fs.existsSync(abs) ? readFile(abs).trim() : '';
+}
 
-  const agentMem = getAgentMemory(agentId, workspacePath).trim();
-  if (agentMem) parts.push(`## Agent Memory (${agentId})\n\n${agentMem}`);
-
-  return parts.join('\n\n');
+/**
+ * Memory is not inlined into task/chat prompts — use CodeGraph MCP, claude-mem MCP, Read tool, etc.
+ * Files remain in `.claude/` for those tools and for the Memory UI.
+ */
+export function buildMemoryContext(_workspacePath: string, _agentId: string): string {
+  return '';
 }
 
 // ─── Sessions ────────────────────────────────────────────────────────────────

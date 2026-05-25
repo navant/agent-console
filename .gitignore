@@ -15,6 +15,21 @@ frontend/dist/
 .claude/memory.md
 .claude/settings.json
 .claude/settings.local.json
+.claude/MEMORY.md
+.claude/MEMORY.md.tmp.*
+.claude/MEMORY.md.err.*
+.claude/codegraph-summary.md
+.claude/hooks/
+.codegraph/
+.archon/
+.cursor/
 
 # Legacy prototype (removed from repo)
 agent control center/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

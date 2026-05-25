@@ -2,22 +2,19 @@ import { execSync } from 'child_process';
 import { runClaude, stopActive, RunOptions } from './claudeRunner';
 import {
   appendTaskProgress,
-  buildMemoryContext,
   getAgent,
   getAgentSoulPath,
   buildSkillInvocationPrompt,
   ensureSkillToolAllowed,
   getTask,
   getTaskPlan,
-  getAgentMemory,
-  getTaskProgress,
-  getWorkflow,
-  saveAgentMemory,
   saveTask,
   saveTaskPlan,
 } from './fileStore';
+import { stripMemoryFromPrompt } from './promptSanitize';
 import { renderWorkflowTemplate } from './workflowRenderer';
-import { TaskConfig, UserStory } from '../types';
+import { resolveWorkflow } from './workflowStore';
+import { TaskConfig } from '../types';
 import { expandHome } from '../config';
 
 export type RalphCallbacks = {
@@ -33,7 +30,7 @@ export function isRalphRunning(): boolean {
   return ralphRunning;
 }
 
-export function stopRalph(): void {
+export function stopRalphRunner(): void {
   stopActive();
   ralphRunning = false;
 }
@@ -49,8 +46,10 @@ export async function runRalphLoop(
   const agent = task.agent ? getAgent(task.agent, workspacePath) : null;
   if (task.agent && !agent) throw new Error(`Agent "${task.agent}" not found`);
 
-  const workflow = getWorkflow(task.workflow, workspacePath);
-  if (!workflow) throw new Error(`Workflow "${task.workflow}" not found`);
+  const workflow = resolveWorkflow(task.workflow, workspacePath);
+  if (!workflow || workflow.type !== 'loop') {
+    throw new Error(`Workflow "${task.workflow}" is not a loop workflow`);
+  }
 
   const plan = getTaskPlan(taskId, workspacePath);
   const pending = plan.userStories
@@ -67,7 +66,6 @@ export async function runRalphLoop(
 
   ralphRunning = true;
   const resolvedWs = expandHome(workspacePath);
-  const memory = buildMemoryContext(workspacePath, task.agent);
   const skillPrefix = buildSkillInvocationPrompt(task.skills, workspacePath);
   const soulPath = agent ? getAgentSoulPath(task.agent, workspacePath) : '';
 
@@ -83,7 +81,9 @@ export async function runRalphLoop(
     if (!ralphRunning || iteration >= maxIter) break;
     iteration++;
 
-    const storyPrompt = renderWorkflowTemplate(workflow.template, { story, memory });
+    const storyPrompt = stripMemoryFromPrompt(
+      renderWorkflowTemplate(workflow.template, { story, memory: '' })
+    );
     const fullPrompt = skillPrefix ? `${skillPrefix}\n\n---\n\n${storyPrompt}` : storyPrompt;
 
     appendTaskProgress(
@@ -100,12 +100,15 @@ export async function runRalphLoop(
         agent: {
           id: agent?.id ?? '',
           model: agent?.model ?? '',
-          tools: task.skills.length > 0 ? ensureSkillToolAllowed(agent?.tools ?? []) : (agent?.tools ?? []),
+          tools:
+            task.skills.length > 0
+              ? ensureSkillToolAllowed(agent?.tools ?? [])
+              : agent?.tools ?? [],
         },
         soulPath,
         workspacePath: resolvedWs,
         sessionId: task.session_id,
-        onMessage: (m) => {
+        onMessage: m => {
           callbacks.onMessage(m);
           if (m.type === 'session_start' && !task.session_id) {
             task.session_id = m.sessionId;
@@ -115,7 +118,6 @@ export async function runRalphLoop(
         },
       });
 
-      // Mark story complete
       story.passes = true;
       const updatedPlan = getTaskPlan(taskId, workspacePath);
       const idx = updatedPlan.userStories.findIndex(s => s.id === story.id);
@@ -132,12 +134,12 @@ export async function runRalphLoop(
 
       if (workflow.commit_on_story) {
         try {
-          execSync('git add -A && git commit -m "ralph: complete story ' + story.id + '"', {
+          execSync(`git add -A && git commit -m "ralph: complete story ${story.id}"`, {
             cwd: resolvedWs,
             stdio: 'pipe',
           });
         } catch {
-          // No changes or not a git repo — ignore
+          // no changes or not a git repo
         }
       }
     } catch (err) {
@@ -156,27 +158,10 @@ export async function runRalphLoop(
     }
   }
 
-  const remaining = getTaskPlan(taskId, workspacePath).userStories.filter(s => !s.passes);
   task.status = 'review';
   task.updatedAt = new Date().toISOString();
   saveTask(task, workspacePath);
   callbacks.onTaskUpdate(task);
-
-  if (agent?.memory) {
-    const progress = getTaskProgress(taskId, workspacePath);
-    const summary = progress.split('\n').slice(-10).join('\n');
-    try {
-      const current = getAgentMemory(task.agent, workspacePath);
-      saveAgentMemory(
-        task.agent,
-        `${current}\n\n## Run ${new Date().toISOString().slice(0, 10)}\n${summary}\n`,
-        workspacePath
-      );
-    } catch {
-      // ignore memory update errors
-    }
-  }
-
   ralphRunning = false;
 }
 
@@ -201,7 +186,7 @@ function runClaudeOnce(opts: {
       sessionId: opts.sessionId,
       onMessage: opts.onMessage,
       onDone: () => resolve(),
-      onError: (err) => reject(new Error(err)),
+      onError: err => reject(new Error(err)),
     });
   });
 }

@@ -169,6 +169,7 @@ export default function SettingsView() {
       )}
 
       {tab === 'task-types' && <TaskTypeConfigPanel />}
+
     </div>
   );
 }

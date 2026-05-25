@@ -1,6 +1,12 @@
 import React from 'react';
 import { useStore } from '../../store/useStore';
 import { TaskTypeDef } from '../../types';
+import {
+  groupWorkflowsForSelect,
+  workflowOptionLabel,
+  workflowRunHint,
+  findWorkflowById,
+} from '../../utils/workflowOptions';
 
 interface TaskTypeFieldsProps {
   taskTypeId: string;
@@ -48,6 +54,7 @@ export default function TaskTypeFields({
   const skills = useStore(s => s.skills);
   const workflows = useStore(s => s.workflows);
   const taskTypes = useStore(s => s.taskTypes);
+  const workflowGroups = groupWorkflowsForSelect(workflows);
 
   const selectedType = taskTypeId ? taskTypes.find(t => t.id === taskTypeId) : null;
   const locked = !!selectedType;
@@ -82,7 +89,8 @@ export default function TaskTypeFields({
   };
 
   const selectedAgent = agentId ? agents.find(a => a.id === agentId) : null;
-  const selectedWorkflow = workflows.find(w => w.id === workflowId);
+  const selectedWorkflow = findWorkflowById(workflows, workflowId);
+  const archonAvailable = workflows.some(w => w.source === 'archon');
 
   return (
     <>
@@ -113,21 +121,40 @@ export default function TaskTypeFields({
 
       {showWorkflow && (
         <div className="field">
-          <label className="field-lbl"><span>Workflow</span></label>
+          <label className="field-lbl">
+            <span>How to run</span>
+            <span className="field-hint">single shot · ralph loop · archon</span>
+          </label>
           <select
             className="text"
             value={workflowId}
             onChange={e => onWorkflowChange(e.target.value)}
             disabled={disabled || workflowLocked}
           >
-            {workflows.length === 0 && <option value="">No workflows</option>}
-            {workflows.map(w => (
-              <option key={w.id} value={w.id}>{w.name} ({w.type})</option>
+            {workflows.length === 0 && <option value="">Loading workflows…</option>}
+            {workflowGroups.map(g => (
+              <optgroup key={g.id} label={g.label}>
+                {g.workflows.map(w => (
+                  <option key={`${w.source}:${w.id}`} value={w.id}>
+                    {workflowOptionLabel(w)}
+                  </option>
+                ))}
+              </optgroup>
             ))}
+            {!archonAvailable && workflows.length > 0 && (
+              <optgroup label="Archon (not loaded)">
+                <option value="" disabled>
+                  Install archon CLI + Workflows → Setup workspace
+                </option>
+              </optgroup>
+            )}
           </select>
           {selectedWorkflow && (
+            <span className="field-hint">{workflowRunHint(selectedWorkflow)}</span>
+          )}
+          {workflowId === 'ralph-loop' && (
             <span className="field-hint">
-              {selectedWorkflow.type === 'loop' ? 'Project task' : 'Simple task'}
+              Tip: use a <strong>project</strong> task and generate a plan (stories) before Run.
             </span>
           )}
         </div>

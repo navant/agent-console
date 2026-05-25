@@ -1,0 +1,6 @@
+# Ralph Progress Log
+Started: (setup creates this file)
+---
+
+## Codebase Patterns
+(Add patterns discovered during iterations)

@@ -46,6 +46,120 @@ export interface SetupConsoleResult {
 }
 export const setupConsole = () =>
   request<SetupConsoleResult>('/config/setup', { method: 'POST' });
+
+export interface MemorySetupStep {
+  id: string;
+  label: string;
+  status: 'pending' | 'running' | 'ok' | 'skipped' | 'failed';
+  detail?: string;
+}
+
+export type MemorySetupStreamEvent =
+  | { type: 'plan'; steps: { id: string; label: string }[] }
+  | { type: 'step'; step: MemorySetupStep }
+  | { type: 'log'; line: string }
+  | { type: 'done'; result: MemorySetupResult };
+
+export interface MemorySetupResult {
+  success: boolean;
+  workspacePath: string;
+  steps: MemorySetupStep[];
+  log: string;
+  hints: string[];
+  memoryTier: 'claude-mem';
+}
+
+export const setupMemory = async (): Promise<MemorySetupResult> => {
+  const res = await fetch(`${BASE}/config/setup-memory`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const data = (await res.json()) as MemorySetupResult & { error?: string };
+  if (res.status === 422 && data.steps) return data;
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+};
+
+function streamApiBase(): string {
+  if (import.meta.env.DEV) {
+    return 'http://127.0.0.1:3001/api';
+  }
+  return BASE;
+}
+
+async function readMemoryStream(
+  path: string,
+  onEvent: (event: MemorySetupStreamEvent) => void,
+  signal?: AbortSignal
+): Promise<MemorySetupResult> {
+  const res = await fetch(`${streamApiBase()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  });
+  if (!res.body) {
+    const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const reader = res.body.getReader();
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: MemorySetupResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as MemorySetupStreamEvent;
+      onEvent(event);
+      if (event.type === 'done') result = event.result;
+    }
+  }
+  if (buffer.trim()) {
+    const event = JSON.parse(buffer) as MemorySetupStreamEvent;
+    onEvent(event);
+    if (event.type === 'done') result = event.result;
+  }
+  if (!result) throw new Error('Stream ended without result');
+  return result;
+}
+
+export interface MemoryDependencyInstallStep {
+  id: string;
+  title: string;
+  commands: readonly string[];
+  note: string;
+}
+
+export interface MemoryDependencyStatus {
+  claude: boolean;
+  jq: boolean;
+  codegraphMcp: boolean;
+  codegraphProject: boolean;
+  claudeMemWorker: boolean;
+  claudeMemPort?: number;
+  bridgeInstalled: boolean;
+}
+
+export const getMemoryDeps = () =>
+  request<{ installSteps: MemoryDependencyInstallStep[]; status: MemoryDependencyStatus }>(
+    '/config/memory-deps'
+  );
+
+export const setupMemoryStream = (
+  onEvent: (event: MemorySetupStreamEvent) => void,
+  signal?: AbortSignal
+) => readMemoryStream('/config/setup-memory/stream', onEvent, signal);
+
+export const refreshMemoryStream = (
+  onEvent: (event: MemorySetupStreamEvent) => void,
+  signal?: AbortSignal
+) => readMemoryStream('/config/refresh-memory/stream', onEvent, signal);
 export const switchWorkspace = (workspaceId: string) =>
   request<{ activeWorkspace: string; workspace: WorkspaceConfig }>('/config/workspace', {
     method: 'POST',
@@ -118,15 +232,6 @@ export const createPrd = (filename: string, content?: string) =>
     method: 'POST',
     body: JSON.stringify({ filename, content }),
   });
-export const implementPrd = (data: {
-  prdPath: string;
-  agent?: string;
-  workflow?: string;
-  skills?: string[];
-  title?: string;
-  taskType?: string;
-}) => request<TaskConfig>('/prd/implement', { method: 'POST', body: JSON.stringify(data) });
-
 // ─── Goals ────────────────────────────────────────────────────────────────────
 export const getGoalFiles = () => request<GoalFile[]>('/goals');
 export const getGoalFile = (path: string) =>
@@ -210,8 +315,110 @@ export const createSkill = (id: string, content?: string) =>
   });
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
+export interface ArchonWorkspaceStatus {
+  gitRepo: boolean;
+  jq: boolean;
+  ralphScripts: boolean;
+  ralphLoopWorkflow: boolean;
+  projectArchonDir: boolean;
+  projectEnvFile: boolean;
+  workflowsDir: boolean;
+  archonSkillInstalled: boolean;
+  workflowCount?: number;
+  globalEnvFile: boolean;
+}
+
+export interface WorkflowDepsResponse {
+  installSteps: { id: string; label: string; command: string; note?: string }[];
+  status: {
+    archon: boolean;
+    archonVersion?: string;
+    archonError?: string;
+    claude: boolean;
+    jq: boolean;
+    workspace?: ArchonWorkspaceStatus;
+  };
+}
+
+export const getWorkflowDeps = () => request<WorkflowDepsResponse>('/workflows/deps');
+
+export type ArchonSetupStepStatus = 'pending' | 'running' | 'ok' | 'skipped' | 'failed';
+
+export interface ArchonSetupStep {
+  id: string;
+  label: string;
+  status: ArchonSetupStepStatus;
+  detail?: string;
+}
+
+export type ArchonSetupStreamEvent =
+  | { type: 'plan'; steps: { id: string; label: string }[] }
+  | { type: 'step'; step: ArchonSetupStep }
+  | { type: 'log'; line: string }
+  | { type: 'done'; result: ArchonSetupResult };
+
+export interface ArchonSetupResult {
+  success: boolean;
+  workspacePath: string;
+  steps: ArchonSetupStep[];
+  log: string;
+  hints: string[];
+}
+
+async function readArchonStream(
+  path: string,
+  onEvent: (event: ArchonSetupStreamEvent) => void,
+  signal?: AbortSignal
+): Promise<ArchonSetupResult> {
+  const res = await fetch(`${streamApiBase()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  });
+  if (!res.body) {
+    const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: ArchonSetupResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as ArchonSetupStreamEvent;
+      onEvent(event);
+      if (event.type === 'done') result = event.result;
+    }
+  }
+  if (buffer.trim()) {
+    const event = JSON.parse(buffer) as ArchonSetupStreamEvent;
+    onEvent(event);
+    if (event.type === 'done') result = event.result;
+  }
+  if (!result) throw new Error('Stream ended without result');
+  return result;
+}
+
+export const setupWorkspaceStream = (
+  onEvent: (event: ArchonSetupStreamEvent) => void,
+  signal?: AbortSignal
+) => readArchonStream('/workflows/setup-workspace/stream', onEvent, signal);
+
+/** @deprecated alias */
+export const setupArchonStream = setupWorkspaceStream;
+
 export const getWorkflows = () => request<WorkflowConfig[]>('/workflows');
-export const getWorkflowFile = (id: string, source: 'global' | 'workspace') =>
+export const getWorkflowFile = (
+  id: string,
+  source: 'global' | 'workspace' | 'builtin' | 'archon'
+) =>
   request<{ id: string; source: string; path: string; content: string }>(
     `/workflows/${encodeURIComponent(id)}/file?source=${source}`
   );
@@ -239,8 +446,6 @@ export const browseDirectory = (path = '~') =>
 
 // ─── Memory ───────────────────────────────────────────────────────────────────
 export const getMemory = () => request<MemoryState>('/memory');
-export const saveWorkspaceMemory = (content: string) =>
-  request<MemoryState>('/memory/workspace', { method: 'PUT', body: JSON.stringify({ content }) });
 export const saveAgentMemory = (agentId: string, content: string) =>
   request<MemoryState>(`/memory/agent/${agentId}`, {
     method: 'PUT',

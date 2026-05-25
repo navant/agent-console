@@ -56,6 +56,11 @@ export const PRD_TEMPLATE_PATH = path.join(REPO_ROOT, 'templates', 'prd_template
 export const GOALS_TEMPLATE_PATH = path.join(REPO_ROOT, 'templates', 'goals_template.md');
 export const AGENTS_TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'agents');
 export const SKILLS_TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'skills');
+export const MEMORY_BRIDGE_TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'hooks', 'claude-mem-bridge');
+export const RALPH_TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'ralph');
+export const RALPH_WORKFLOW_TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'workflows', 'ralph-loop');
+/** Workspace-relative target for copied Ralph files */
+export const RALPH_SCRIPTS_REL = 'scripts/ralph';
 
 // Legacy helpers — prefer resolveWorkspacePath with getPathSettings() from fileStore
 export function workspaceClaudeDir(workspacePath: string): string {
@@ -82,6 +87,10 @@ export function workspacePrdDir(workspacePath: string): string {
   return path.join(workspaceClaudeDir(workspacePath), 'prd');
 }
 
-export function workspaceMemoryPath(workspacePath: string): string {
-  return path.join(workspaceClaudeDir(workspacePath), 'memory.md');
+export const SESSION_MEMORY_FILENAME = 'MEMORY.md';
+export const CODEGRAPH_SUMMARY_FILENAME = 'codegraph-summary.md';
+export const CODEGRAPH_SUMMARY_IMPORT = '@.claude/codegraph-summary.md';
+
+export function sessionMemoryPath(workspacePath: string): string {
+  return path.join(workspaceClaudeDir(workspacePath), SESSION_MEMORY_FILENAME);
 }

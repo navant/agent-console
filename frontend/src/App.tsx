@@ -24,7 +24,6 @@ export default function App() {
   const appendTaskProgress = useStore(s => s.appendTaskProgress);
   const appendTaskComment = useStore(s => s.appendTaskComment);
   const setAutomation = useStore(s => s.setAutomation);
-  const setTaskPlan = useStore(s => s.setTaskPlan);
   const openTaskTab = useStore(s => s.openTaskTab);
 
   useEffect(() => {
@@ -71,13 +70,6 @@ export default function App() {
         case 'automation_state':
           setAutomation(msg.autoQueue);
           break;
-        case 'story_complete':
-          setTaskPlan(msg.taskId, {
-            userStories: useStore.getState().taskPlans[msg.taskId]?.userStories.map(s =>
-              s.id === msg.storyId ? { ...s, passes: true } : s
-            ) ?? [],
-          });
-          break;
       }
     });
 
@@ -91,7 +83,7 @@ export default function App() {
     };
   }, [
     addMessage, setRunning, setCurrentSessionId, setWsConnected,
-    updateTask, appendTaskProgress, appendTaskComment, setAutomation, setTaskPlan,
+    updateTask, appendTaskProgress, appendTaskComment, setAutomation,
   ]);
 
   return (

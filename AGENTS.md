@@ -10,7 +10,6 @@ agent-console/
 ├── frontend/         React + Vite + Zustand (port 3000)
 ├── templates/        Bundled agents/skills (copied via Settings → Setup workspace)
 ├── .claude/          Example workflows + path rules (not user runtime data)
-├── plan.md           Product plan
 └── CLAUDE.md         Claude Code overrides (@imports this file)
 ```
 
@@ -30,6 +29,14 @@ npm run dev
 | Frontend | Workspace tabs, kanban, task tabs, Planning/Goals, settings |
 | Backend | REST + WS; `claude` / slash commands; workspace `.claude/` I/O |
 | Data | `~/.agent-console/config.json` + per-workspace `.claude/*` |
+
+## Workflows (single-shot, Ralph loop, optional Archon)
+
+- **`single-shot`** — one headless Claude run (`taskPrompt.ts`: task + PRD + skills + comments; no inlined memory).
+- **`ralph-loop`** — stories from task `prd.json` via `ralphRunner.ts`; templates in `templates/ralph/`.
+- **Archon** — from `archon workflow list` when CLI is on PATH; **Workflows** tab for setup/prerequisites.
+- Memory is **MCP/tools only** — not in prompts (`buildMemoryContext()` returns empty; use CodeGraph / claude-mem).
+- PRD: `.claude/prd/`; **Expand with PRD skill** creates a task (no built-in plan/spawn modals).
 
 ## Coding standards
 

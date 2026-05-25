@@ -14,7 +14,6 @@ import {
   saveTaskPrompt,
   getAgent,
   getAgentSoulPath,
-  buildMemoryContext,
   getWorkflow,
 } from '../services/fileStore';
 import { resolveTaskTypeFields } from '../services/taskTypesStore';
@@ -259,6 +258,8 @@ Return ONLY valid JSON in this format:
       '-p', `${systemPrompt}\n\nTask:\n${promptText}`,
       '--output-format', 'json',
       '--dangerously-skip-permissions',
+      '--setting-sources',
+      'user',
     ];
 
     const proc = spawn('claude', args, { stdio: ['ignore', 'pipe', 'pipe'] });

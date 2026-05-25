@@ -60,6 +60,10 @@ export function runClaude(opts: RunOptions): void {
   // Skip permission prompts (we're running headless)
   args.push('--dangerously-skip-permissions');
 
+  // Skip project .claude/settings.json hooks (sync-memory SessionEnd) but keep user OAuth login.
+  // --bare breaks auth ("Not logged in"); --setting-sources user avoids workspace hooks.
+  args.push('--setting-sources', 'user');
+
   const resolvedWorkspace = workspacePath ? expandHome(workspacePath) : null;
   if (resolvedWorkspace && fs.existsSync(resolvedWorkspace)) {
     args.push('--add-dir', resolvedWorkspace);
@@ -81,9 +85,14 @@ export function runClaude(opts: RunOptions): void {
 
   let capturedSessionId = sessionId || '';
   let buffer = '';
+  let lastOutput = '';
 
   const spawnOpts: { env: NodeJS.ProcessEnv; cwd?: string } = {
-    env: { ...process.env, FORCE_COLOR: '0' },
+    env: {
+      ...process.env,
+      FORCE_COLOR: '0',
+      AGENT_CONSOLE_HEADLESS: '1',
+    },
   };
 
   // Run claude in the workspace directory if provided
@@ -125,6 +134,7 @@ export function runClaude(opts: RunOptions): void {
           capturedSessionId = m.sessionId;
           appendSessionLog(capturedSessionId, trimmed);
         }
+        if (m.type === 'text') lastOutput += m.content;
         onMessage(m);
       }
     }
@@ -132,13 +142,24 @@ export function runClaude(opts: RunOptions): void {
 
   proc.stderr?.on('data', (chunk: Buffer) => {
     const msg = chunk.toString().trim();
-    if (msg) onMessage({ type: 'error', message: msg });
+    if (msg) {
+      lastOutput += msg;
+      onMessage({ type: 'error', message: msg });
+    }
   });
 
   proc.on('close', (code) => {
     activeProcess = null;
+    const notLoggedIn = /not logged in|please run \/login/i.test(lastOutput);
+    // 143 = SIGTERM (user stop or stopActive); don't treat as hook failure if we already streamed output
     if (code === 0 || code === null) {
       onDone(capturedSessionId);
+    } else if (code === 143 && capturedSessionId) {
+      onDone(capturedSessionId);
+    } else if (notLoggedIn) {
+      onError(
+        'Claude Code is not logged in. In a terminal run `claude`, then `/login`, and retry the task.'
+      );
     } else {
       onError(`claude exited with code ${code}`);
     }

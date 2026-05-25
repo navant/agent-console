@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import CollapsibleSection from './CollapsibleSection';
 import { useStore } from '../../store/useStore';
-import { saveWorkspaceMemory, saveAgentMemory } from '../../api/client';
+import { saveAgentMemory } from '../../api/client';
 
 export default function MemorySection() {
   const memory = useStore(s => s.memory);
@@ -11,11 +11,6 @@ export default function MemorySection() {
   const setMemory = useStore(s => s.setMemory);
   const [editingAgent, setEditingAgent] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-
-  const saveWorkspace = async (content: string) => {
-    const updated = await saveWorkspaceMemory(content);
-    setMemory(updated);
-  };
 
   const saveAgent = async (agentId: string, content: string) => {
     const updated = await saveAgentMemory(agentId, content);
@@ -30,7 +25,7 @@ export default function MemorySection() {
       onToggle={() => toggleSection('memory')}
     >
       {!activeWorkspaceId && (
-        <div className="side-empty">Add a workspace to edit memory</div>
+        <div className="side-empty">Add a workspace to view memory</div>
       )}
       {activeWorkspaceId && !memory && (
         <div className="side-empty">Loading memory…</div>
@@ -38,13 +33,17 @@ export default function MemorySection() {
       {memory && (
         <div className="side-panel-content">
           <div className="field">
-            <label className="field-lbl"><span>Workspace memory</span></label>
+            <label className="field-lbl">
+              <span>Memory</span>
+              <span className="muted"> · MEMORY.md</span>
+            </label>
             <textarea
               className="text mono side-editor"
               rows={4}
-              value={memory.workspace.content}
-              onChange={e => saveWorkspace(e.target.value)}
+              readOnly
+              value={memory.workspace.content || '_Empty — run Refresh summaries in the Memory tab._'}
             />
+            <p className="muted side-hint">Updated by claude-mem. Edit in the Memory tab or run a session.</p>
           </div>
           {memory.agents.length > 0 && (
             <div className="side-sub-list">

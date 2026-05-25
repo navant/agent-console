@@ -15,6 +15,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
   const taskTypes = useStore(s => s.taskTypes);
   const selectedSkills = useStore(s => s.selectedSkills);
   const addTask = useStore(s => s.addTask);
+  const loadWorkspaceData = useStore(s => s.loadWorkspaceData);
 
   const [title, setTitle] = useState('');
   const [taskTypeId, setTaskTypeId] = useState('');
@@ -29,17 +30,18 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
 
   useEffect(() => {
     if (open) {
+      void loadWorkspaceData();
       setTitle('');
       setDescription('');
       setTaskTypeId('');
       setAgentId('');
-      setWorkflowId(workflows[0]?.id || 'single-shot');
+      setWorkflowId('single-shot');
       setSkillIds([...selectedSkills]);
       setSkillSearch('');
       setPrdPath('');
       getPrdFiles().then(setPrds).catch(() => setPrds([]));
     }
-  }, [open, workflows, selectedSkills]);
+  }, [open, selectedSkills, loadWorkspaceData]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +70,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
       });
       addTask(task);
       onClose();
-      onCreated?.(task.id, task.type === 'project');
+      onCreated?.(task.id, false);
     } catch (err) {
       console.error('Failed to create task:', err);
     } finally {
@@ -123,16 +125,22 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
             <div className="field">
               <label className="field-lbl">
                 <span>Notes</span>
-                <span className="field-hint">extra context (optional if PRD selected)</span>
+                <span className="field-hint">short task instructions only — not chat logs</span>
               </label>
               <textarea className="text mono" rows={5} value={description} onChange={e => setDescription(e.target.value)} />
             </div>
+            <p className="field-hint muted" style={{ margin: 0 }}>
+              New tasks stay in <strong>Todo</strong>. Move to <strong>Planned</strong> (or click Run) to execute.
+              Auto-queue only picks <strong>Planned</strong> tasks.
+            </p>
           </div>
         </div>
 
         <footer className="modal-ft">
           <div className="modal-ft-meta muted">
-            {selectedWorkflow?.type === 'loop' ? 'Creates project task' : 'Creates simple task'}
+            Simple task
+            {selectedWorkflow?.agent ? ` · agent ${selectedWorkflow.agent}` : ''}
+            {selectedWorkflow?.skills?.length ? ` · skills ${selectedWorkflow.skills.join(', ')}` : ''}
             {taskTypeId && ` · ${taskTypes.find(t => t.id === taskTypeId)?.name ?? taskTypeId}`}
           </div>
           <div className="modal-ft-actions">

@@ -10,10 +10,6 @@ let autoQueueEnabled = true;
 let queueLock = false;
 let callbacks: TaskRunCallbacks | null = null;
 
-function getWs(): TaskRunCallbacks | null {
-  return callbacks;
-}
-
 export function setTaskQueueCallbacks(cbs: TaskRunCallbacks): void {
   callbacks = cbs;
 }
@@ -27,10 +23,9 @@ export function setAutoQueue(enabled: boolean): void {
   if (enabled) void tick();
 }
 
-/** Pick next todo task when auto-queue is enabled. Nudge is manual only. */
 export async function tick(): Promise<void> {
   if (queueLock || isTaskRunnerBusy()) return;
-  const cbs = getWs();
+  const cbs = callbacks;
   const activeWs = getActiveWorkspace();
   if (!cbs || !activeWs || !autoQueueEnabled) return;
 

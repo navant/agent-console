@@ -72,13 +72,18 @@ export interface WorkspaceTab {
   taskId?: string;
 }
 
+export type MemoryFileKind = 'editable' | 'generated' | 'folder' | 'wiki' | 'agent';
+
 export interface MemoryFileEntry {
   id: string;
   name: string;
   path: string;
   scope: 'workspace' | 'agent' | 'wiki';
+  kind?: MemoryFileKind;
+  description?: string;
   agentId?: string;
   isDir?: boolean;
+  readOnly?: boolean;
   children?: MemoryFileEntry[];
 }
 export type TaskType = 'simple' | 'project';
@@ -102,6 +107,8 @@ export interface TaskConfig {
   skills: string[];
   taskType?: string;
   prd?: string;
+  storyId?: string;
+  storyPriority?: number;
   goal?: string;
   description?: string;
   session_id?: string;
@@ -131,11 +138,15 @@ export interface SkillConfig {
 export interface WorkflowConfig {
   id: string;
   name: string;
-  type: 'loop' | 'single';
+  description?: string;
+  type: 'single' | 'loop';
   max_iterations?: number;
   commit_on_story?: boolean;
+  agent?: string;
+  skills: string[];
+  task_type?: string;
   template: string;
-  source: 'global' | 'workspace';
+  source: 'global' | 'workspace' | 'builtin' | 'archon';
 }
 
 export interface UserStory {
@@ -145,9 +156,11 @@ export interface UserStory {
   acceptanceCriteria: string[];
   priority: number;
   passes: boolean;
+  taskId?: string;
 }
 
 export interface PlanConfig {
+  prdPath?: string;
   userStories: UserStory[];
 }
 
@@ -164,6 +177,7 @@ export interface MemoryState {
   workspace: MemoryFile;
   agents: MemoryFile[];
   files?: MemoryFileEntry[];
+  claudeMemAvailable?: boolean;
 }
 
 export interface AppConfig {
@@ -199,5 +213,4 @@ export type WSServerMessage =
   | { type: 'task_update'; task: TaskConfig }
   | { type: 'progress_append'; taskId: string; line: string }
   | { type: 'comment_append'; taskId: string; comment: TaskComment }
-  | { type: 'automation_state'; autoQueue: boolean }
-  | { type: 'story_complete'; taskId: string; storyId: string };
+  | { type: 'automation_state'; autoQueue: boolean };

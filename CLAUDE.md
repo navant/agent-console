@@ -24,3 +24,12 @@ npm run dev
 | UI state | `frontend/src/store/useStore.ts` |
 
 Path-scoped rules: `.claude/rules/`.
+
+
+## Lessons from past sessions
+
+@.claude/MEMORY.md
+
+## Codebase (CodeGraph)
+
+@.claude/codegraph-summary.md

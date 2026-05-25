@@ -1,6 +1,7 @@
 import React from 'react';
 import { TaskConfig } from '../../types';
 import { useStore } from '../../store/useStore';
+import { findWorkflowById } from '../../utils/workflowOptions';
 
 interface TaskCardProps {
   task: TaskConfig;
@@ -52,6 +53,16 @@ export default function TaskCard({
   task, selected, dragging, onSelect, onEdit, onContinueInChat, onNudge, onAction, onDragStart, onDragEnd,
 }: TaskCardProps) {
   const taskTypes = useStore(s => s.taskTypes);
+  const workflows = useStore(s => s.workflows);
+  const wf = findWorkflowById(workflows, task.workflow);
+  const workflowLabel =
+    task.workflow === 'single-shot'
+      ? 'single'
+      : task.workflow === 'ralph-loop'
+        ? 'ralph'
+        : wf?.source === 'archon'
+          ? 'archon'
+          : task.workflow;
   const isRunning = task.status === 'running';
   const isInactive = task.status === 'done' || task.status === 'archive';
   const canNudge = !isRunning && !isInactive;
@@ -68,7 +79,9 @@ export default function TaskCard({
       <span className="task-drag-hint" title="Drag to move">⠿</span>
       <div className="task-hd">
         <span className="task-id">{task.id}</span>
-        <span className="workflow-badge">{task.workflow}</span>
+        <span className="workflow-badge" title={wf?.name ?? task.workflow}>
+          {workflowLabel}
+        </span>
         {task.taskType && (
           <span className="task-type-badge" title="Task type">
             {taskTypes.find(t => t.id === task.taskType)?.name ?? task.taskType}

@@ -215,7 +215,7 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
             <h1>Tasks</h1>
             <span className="kanban-sub">
               {tasks.length} total · {runningCount} active
-              {autoQueue ? ' · auto-queue on' : ''}
+              {autoQueue ? ' · auto-queue: Planned only' : ''}
             </span>
           </div>
           <div className="kanban-actions">
@@ -231,7 +231,7 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
               type="button"
               className={'btn btn-sm' + (autoQueue ? ' is-on' : '')}
               onClick={toggleAutoQueue}
-              title="Automatically run todo tasks one at a time"
+              title="Orchestrator polls kanban (workflow tracker active states) and dispatches runs"
             >
               {autoQueue ? '⏸ Auto-queue' : '▶ Auto-queue'}
             </button>

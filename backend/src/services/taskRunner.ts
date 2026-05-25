@@ -2,16 +2,13 @@ import {
   getTask,
   getAgent,
   getAgentSoulPath,
-  getTaskPrompt,
-  getTaskPlan,
-  buildMemoryContext,
   buildSkillInvocationPrompt,
   ensureSkillToolAllowed,
   appendTaskProgress,
   saveTask,
   listTasks,
 } from './fileStore';
-import { getPrdContent } from './prdStore';
+import { buildRunPrompt } from './taskPrompt';
 import {
   getTaskComments,
   formatCommentsForPrompt,
@@ -19,9 +16,11 @@ import {
   hasPendingUserFeedback,
 } from './taskComments';
 import { runClaude, stopActive, isClaudeRunning } from './claudeRunner';
-import { runRalphLoop, isRalphRunning, stopRalph } from './ralphRunner';
+import { runArchonTask, stopArchonRunner, isArchonRunnerBusy } from './archonRunner';
 import { runSlashCommand, isSlashRunning } from './ptyRunner';
 import { buildGoalSlashCommand } from './goalsStore';
+import { isArchonWorkflowId, isRalphLoopWorkflowId, SINGLE_SHOT_WORKFLOW_ID } from './workflowStore';
+import { runRalphLoop, isRalphRunning, stopRalphRunner } from './ralphRunner';
 import { TaskConfig, WSServerMessage } from '../types';
 
 export type RunSource = 'manual' | 'queue' | 'nudge';
@@ -37,118 +36,21 @@ export interface TaskRunCallbacks {
 }
 
 export function isTaskRunnerBusy(): boolean {
-  return isClaudeRunning() || isRalphRunning() || isSlashRunning();
+  return isClaudeRunning() || isSlashRunning() || isArchonRunnerBusy() || isRalphRunning();
 }
 
 function isGoalTask(task: TaskConfig): boolean {
   return task.taskType === 'goals' || !!task.goal;
 }
 
-export function buildTaskPrompt(
-  taskId: string,
-  workspacePath: string,
-  task: { agent: string; skills: string[]; title: string; prd?: string },
-  options?: { nudge?: boolean; feedbackOnly?: boolean }
-): string {
-  const comments = getTaskComments(workspacePath, taskId);
-  const pendingFeedback = hasPendingUserFeedback(comments);
-  const useNudge = options?.nudge || pendingFeedback || options?.feedbackOnly;
-
-  if (useNudge) {
-    return buildNudgePrompt(taskId, workspacePath, task, comments);
-  }
-
-  const memory = buildMemoryContext(workspacePath, task.agent);
-  const skills = buildSkillInvocationPrompt(task.skills, workspacePath);
-
-  let prdBody = '';
-  if (task.prd) {
-    try {
-      prdBody = getPrdContent(workspacePath, task.prd);
-    } catch {
-      // ignore missing prd file
-    }
-  }
-
-  const taskPrompt = (getTaskPrompt(taskId, workspacePath) || '').trim();
-  let prompt = '';
-  if (prdBody.trim()) {
-    prompt = `# PRD: ${task.prd}\n\n${prdBody}`;
-    if (taskPrompt && taskPrompt !== prdBody.trim()) {
-      prompt += `\n\n---\n\n## Additional task context\n\n${taskPrompt}`;
-    }
-  } else if (taskPrompt) {
-    prompt = taskPrompt;
-  } else {
-    prompt = task.title;
-  }
-
-  const commentBlock = formatCommentsForPrompt(comments, { nudge: false });
-  const parts: string[] = [];
-  if (memory) parts.push(memory);
-  if (skills) parts.push(skills);
-  parts.push(prompt);
-  if (commentBlock) {
-    parts.push(
-      commentBlock +
-        '\n\nAddress any open user comments above as part of this run. Do not claim the task is finished while user feedback is unanswered.'
-    );
-  }
-  return parts.join('\n\n---\n\n');
-}
-
-function buildNudgePrompt(
-  taskId: string,
-  workspacePath: string,
-  task: { title: string; prd?: string; skills: string[] },
-  comments: ReturnType<typeof getTaskComments>
-): string {
-  const taskPrompt = getTaskPrompt(taskId, workspacePath) || task.title;
-  let prdSnippet = '';
-  if (task.prd) {
-    try {
-      const prdBody = getPrdContent(workspacePath, task.prd);
-      if (prdBody.trim()) prdSnippet = `\n\n## Linked PRD (${task.prd})\n${prdBody.slice(0, 3000)}`;
-    } catch { /* ignore */ }
-  }
-
-  const thread = formatCommentsForPrompt(comments, { nudge: true });
-  const skills = buildSkillInvocationPrompt(task.skills, workspacePath);
-  const skillsBlock = skills ? `${skills}\n\n---\n\n` : '';
-
-  return `${skillsBlock}# Task: ${task.title} (${taskId})
-
-## Your job right now
-The user left comments on this task. Read the full comment thread below and **continue working** — address every user message, fix issues, and implement requested changes.
-
-**Do NOT** reply with "task completed" or stop unless all user comments are fully addressed.
-
-## Original spec
-${taskPrompt.slice(0, 4000)}${prdSnippet}
-
-${thread}
-
-Respond in the task thread with what you changed and what is still open.
-
-If the user asks you to run a shell command (e.g. print test), use the Bash tool to execute it and report the output.`;
-}
-
-/** Tasks with user comments not yet answered by the agent. */
-export function findTasksNeedingNudge(workspacePath: string): TaskConfig[] {
-  return listTasks(workspacePath).filter(t => {
-    if (t.status === 'running' || t.status === 'done' || t.status === 'archive') return false;
-    const comments = getTaskComments(workspacePath, t.id);
-    return hasPendingUserFeedback(comments);
-  });
-}
-
+/** Auto-queue only runs `planned` tasks — not fresh `todo` (avoids running on create). */
 export function findNextTodoTask(workspacePath: string): TaskConfig | null {
-  const todos = listTasks(workspacePath).filter(
-    t => t.status === 'todo' || t.status === 'planned'
+  const todos = listTasks(workspacePath).filter(t => t.status === 'planned');
+  return (
+    todos.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    )[0] ?? null
   );
-  return todos.sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  )[0] ?? null;
 }
 
 export function executeTask(
@@ -186,12 +88,16 @@ export function executeTask(
     const comments = getTaskComments(workspacePath, taskId);
     const pendingFeedback = hasPendingUserFeedback(comments);
     const useNudgePrompt = nudge || pendingFeedback;
+    const workflowId = task.workflow?.trim() || SINGLE_SHOT_WORKFLOW_ID;
+    const useArchon = isArchonWorkflowId(workflowId) && !useNudgePrompt && !isGoalTask(task);
+    const useRalph =
+      isRalphLoopWorkflowId(workflowId) && !useNudgePrompt && !isGoalTask(task) && !useArchon;
 
     const commentTracker = createRunCommentTracker(
       workspacePath,
       task.id,
       agentName,
-      (comment) => broadcast({ type: 'comment_append', taskId: task.id, comment })
+      c => broadcast({ type: 'comment_append', taskId: task.id, comment: c })
     );
     commentTracker.onRunStart(nudge || pendingFeedback);
 
@@ -220,16 +126,14 @@ export function executeTask(
         task.id,
         workspacePath,
         `[${new Date().toISOString()}] Slash command: ${command}\n`,
-        (line) => broadcast({ type: 'progress_append', taskId: task.id, line })
+        line => broadcast({ type: 'progress_append', taskId: task.id, line })
       );
 
       runSlashCommand({
         command,
         sessionId: task.session_id,
         workspacePath,
-        onOutput: (text) => {
-          sendTo({ type: 'text', content: text });
-        },
+        onOutput: text => sendTo({ type: 'text', content: text }),
         onDone: () => {
           commentTracker.onDone();
           task.status = pendingFeedback || nudge ? 'todo' : 'review';
@@ -239,21 +143,106 @@ export function executeTask(
             task.id,
             workspacePath,
             `[${new Date().toISOString()}] Goal slash finished — ${task.status} (${Date.now() - startedAt}ms)\n`,
-            (line) => broadcast({ type: 'progress_append', taskId: task.id, line })
+            line => broadcast({ type: 'progress_append', taskId: task.id, line })
           );
           sendTo({
             type: 'done',
-            result: task.status === 'todo'
-              ? 'Returned to todo — review comments'
-              : 'Moved to review — goal command finished',
+            result:
+              task.status === 'todo'
+                ? 'Returned to todo — review comments'
+                : 'Moved to review — goal command finished',
           });
           broadcast({ type: 'task_update', task });
           finish();
         },
-        onError: (err) => {
+        onError: err => {
           commentTracker.onError(err);
           sendTo({ type: 'error', message: err });
-          task.status = 'todo';
+          task.status = 'review';
+          task.updatedAt = new Date().toISOString();
+          saveTask(task, workspacePath);
+          broadcast({ type: 'task_update', task });
+          fail(new Error(err));
+        },
+      });
+    };
+
+    const runRalph = () => {
+      const startedAt = Date.now();
+      appendTaskProgress(
+        task.id,
+        workspacePath,
+        `[${new Date().toISOString()}] Ralph loop: ${workflowId}\n`,
+        line => broadcast({ type: 'progress_append', taskId: task.id, line })
+      );
+
+      runRalphLoop(task.id, workspacePath, {
+        onMessage: m => {
+          commentTracker.onMessage(m);
+          sendTo(m);
+          if (m.type === 'session_start') {
+            task.session_id = m.sessionId;
+            task.updatedAt = new Date().toISOString();
+            saveTask(task, workspacePath);
+          }
+        },
+        onProgress: line => broadcast({ type: 'progress_append', taskId: task.id, line }),
+        onStoryComplete: () => broadcast({ type: 'task_update', task }),
+        onTaskUpdate: t => broadcast({ type: 'task_update', task: t }),
+      })
+        .then(() => {
+          commentTracker.onDone();
+          appendTaskProgress(
+            task.id,
+            workspacePath,
+            `[${new Date().toISOString()}] Ralph loop finished (${Date.now() - startedAt}ms)\n`,
+            line => broadcast({ type: 'progress_append', taskId: task.id, line })
+          );
+          sendTo({ type: 'done', result: 'Ralph loop finished — moved to review' });
+          finish();
+        })
+        .catch(err => {
+          commentTracker.onError(String(err));
+          sendTo({ type: 'error', message: String(err) });
+          fail(err instanceof Error ? err : new Error(String(err)));
+        });
+    };
+
+    const runArchon = () => {
+      const message = buildRunPrompt(taskId, workspacePath, task, { nudge: false });
+      const startedAt = Date.now();
+      appendTaskProgress(
+        task.id,
+        workspacePath,
+        `[${new Date().toISOString()}] Archon workflow: ${workflowId}\n`,
+        line => broadcast({ type: 'progress_append', taskId: task.id, line })
+      );
+
+      runArchonTask({
+        taskId: task.id,
+        workspacePath,
+        workflowId,
+        message,
+        onOutput: text => sendTo({ type: 'text', content: text }),
+        onDone: () => {
+          commentTracker.onDone();
+          task.status = 'review';
+          task.updatedAt = new Date().toISOString();
+          saveTask(task, workspacePath);
+          appendTaskProgress(
+            task.id,
+            workspacePath,
+            `[${new Date().toISOString()}] Archon finished (${Date.now() - startedAt}ms)\n`,
+            line => broadcast({ type: 'progress_append', taskId: task.id, line })
+          );
+          sendTo({ type: 'done', result: 'Archon workflow finished — moved to review' });
+          broadcast({ type: 'task_update', task });
+          finish();
+        },
+        onError: err => {
+          commentTracker.onError(err);
+          sendTo({ type: 'error', message: err });
+          task.status = 'review';
           task.updatedAt = new Date().toISOString();
           saveTask(task, workspacePath);
           broadcast({ type: 'task_update', task });
@@ -263,7 +252,7 @@ export function executeTask(
     };
 
     const runSimpleTask = (freshSession: boolean) => {
-      const prompt = buildTaskPrompt(taskId, workspacePath, task, { nudge: useNudgePrompt });
+      const prompt = buildRunPrompt(taskId, workspacePath, task, { nudge: useNudgePrompt });
       const sessionId = freshSession ? undefined : task.session_id;
 
       runClaude({
@@ -273,9 +262,12 @@ export function executeTask(
         model: agent?.model ?? '',
         soulPath,
         workspacePath,
-        tools: task.skills.length > 0 ? ensureSkillToolAllowed(agent?.tools ?? []) : (agent?.tools ?? []),
+        tools:
+          task.skills.length > 0
+            ? ensureSkillToolAllowed(agent?.tools ?? [])
+            : agent?.tools ?? [],
         sessionId,
-        onMessage: (m) => {
+        onMessage: m => {
           commentTracker.onMessage(m);
           sendTo(m);
           if (m.type === 'session_start') {
@@ -284,7 +276,7 @@ export function executeTask(
             saveTask(task, workspacePath);
           }
         },
-        onDone: (sessionId) => {
+        onDone: sessionId => {
           const stats = commentTracker.onDone();
           if (stats.substantive) {
             task.session_id = sessionId || task.session_id;
@@ -300,25 +292,25 @@ export function executeTask(
           appendTaskProgress(
             task.id,
             workspacePath,
-            `[${new Date().toISOString()}] Run finished — ${task.status} (tools: ${stats.toolUseCount}, ${stats.durationMs}ms)`,
-            (line) => broadcast({ type: 'progress_append', taskId: task.id, line })
+            `[${new Date().toISOString()}] Run finished — ${task.status} (tools: ${stats.toolUseCount}, ${stats.durationMs}ms)\n`,
+            line => broadcast({ type: 'progress_append', taskId: task.id, line })
           );
           sendTo({
             type: 'done',
             result:
               !stats.substantive && stats.toolUseCount === 0
-                ? 'No tools run — returned to todo'
+                ? 'No agent output — returned to todo'
                 : task.status === 'todo'
                   ? 'Returned to todo — review comments'
-                  : 'Moved to review — continue in chat',
+                  : 'Moved to review',
           });
           broadcast({ type: 'task_update', task });
           finish();
         },
-        onError: (err) => {
+        onError: err => {
           commentTracker.onError(err);
           sendTo({ type: 'error', message: err });
-          task.status = 'todo';
+          task.status = 'review';
           task.updatedAt = new Date().toISOString();
           saveTask(task, workspacePath);
           broadcast({ type: 'task_update', task });
@@ -327,56 +319,18 @@ export function executeTask(
       });
     };
 
-    if (task.type === 'project') {
-      const plan = getTaskPlan(taskId, workspacePath);
-      const pendingStories = plan.userStories.filter(s => !s.passes);
-      if (pendingStories.length === 0) {
-        runSimpleTask(true);
-        return;
-      }
-
-      runRalphLoop(taskId, workspacePath, {
-        onMessage: (m) => {
-          commentTracker.onMessage(m);
-          sendTo(m);
-          if (m.type === 'session_start') {
-            task.session_id = m.sessionId;
-            task.updatedAt = new Date().toISOString();
-            saveTask(task, workspacePath);
-          }
-        },
-        onProgress: (line) => {
-          broadcast({ type: 'progress_append', taskId: task.id, line });
-        },
-        onStoryComplete: (storyId) => {
-          broadcast({ type: 'story_complete', taskId: task.id, storyId });
-        },
-        onTaskUpdate: (updated) => {
-          broadcast({ type: 'task_update', task: updated });
-        },
-      })
-        .then(() => {
-          const stats = commentTracker.onDone();
-          sendTo({
-            type: 'done',
-            result: stats.substantive ? 'Task completed' : 'Ralph loop finished — review progress',
-          });
-          finish();
-        })
-        .catch((err) => {
-          commentTracker.onError(String(err));
-          sendTo({ type: 'error', message: String(err) });
-          task.status = 'review';
-          task.updatedAt = new Date().toISOString();
-          saveTask(task, workspacePath);
-          broadcast({ type: 'task_update', task });
-          fail(err instanceof Error ? err : new Error(String(err)));
-        });
+    if (isGoalTask(task) && task.goal && !useNudgePrompt) {
+      runGoalSlashTask();
       return;
     }
 
-    if (isGoalTask(task) && task.goal && !useNudgePrompt) {
-      runGoalSlashTask();
+    if (useArchon) {
+      runArchon();
+      return;
+    }
+
+    if (useRalph) {
+      runRalph();
       return;
     }
 
@@ -386,5 +340,6 @@ export function executeTask(
 
 export function stopTaskRunner(): void {
   stopActive();
-  stopRalph();
+  stopArchonRunner();
+  stopRalphRunner();
 }

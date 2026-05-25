@@ -14,6 +14,7 @@ interface EditTaskModalProps {
 export default function EditTaskModal({ open, taskId, onClose, onDelete }: EditTaskModalProps) {
   const tasks = useStore(s => s.tasks);
   const updateTask = useStore(s => s.updateTask);
+  const loadWorkspaceData = useStore(s => s.loadWorkspaceData);
 
   const task = tasks.find(t => t.id === taskId);
 
@@ -30,6 +31,7 @@ export default function EditTaskModal({ open, taskId, onClose, onDelete }: EditT
 
   useEffect(() => {
     if (!open || !taskId) return;
+    void loadWorkspaceData();
     const t = tasks.find(x => x.id === taskId);
     if (!t) return;
     setTitle(t.title);
@@ -43,7 +45,7 @@ export default function EditTaskModal({ open, taskId, onClose, onDelete }: EditT
     getTask(taskId)
       .then(full => setDescription(full.prompt ?? full.description ?? ''))
       .catch(() => setDescription(t.description ?? ''));
-  }, [open, taskId, tasks]);
+  }, [open, taskId, tasks, loadWorkspaceData]);
 
   useEffect(() => {
     if (!open) return;

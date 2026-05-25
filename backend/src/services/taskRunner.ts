@@ -20,6 +20,8 @@ import {
 } from './taskComments';
 import { runClaude, stopActive, isClaudeRunning } from './claudeRunner';
 import { runRalphLoop, isRalphRunning, stopRalph } from './ralphRunner';
+import { runSlashCommand, isSlashRunning } from './ptyRunner';
+import { buildGoalSlashCommand } from './goalsStore';
 import { TaskConfig, WSServerMessage } from '../types';
 
 export type RunSource = 'manual' | 'queue' | 'nudge';
@@ -35,7 +37,11 @@ export interface TaskRunCallbacks {
 }
 
 export function isTaskRunnerBusy(): boolean {
-  return isClaudeRunning() || isRalphRunning();
+  return isClaudeRunning() || isRalphRunning() || isSlashRunning();
+}
+
+function isGoalTask(task: TaskConfig): boolean {
+  return task.taskType === 'goals' || !!task.goal;
 }
 
 export function buildTaskPrompt(
@@ -54,17 +60,29 @@ export function buildTaskPrompt(
 
   const memory = buildMemoryContext(workspacePath, task.agent);
   const skills = buildSkillInvocationPrompt(task.skills, workspacePath);
-  let prompt = getTaskPrompt(taskId, workspacePath) || task.title;
+
+  let prdBody = '';
   if (task.prd) {
     try {
-      const prdBody = getPrdContent(workspacePath, task.prd);
-      if (prdBody.trim()) {
-        prompt = `# PRD: ${task.prd}\n\n${prdBody}\n\n---\n\n${prompt}`;
-      }
+      prdBody = getPrdContent(workspacePath, task.prd);
     } catch {
       // ignore missing prd file
     }
   }
+
+  const taskPrompt = (getTaskPrompt(taskId, workspacePath) || '').trim();
+  let prompt = '';
+  if (prdBody.trim()) {
+    prompt = `# PRD: ${task.prd}\n\n${prdBody}`;
+    if (taskPrompt && taskPrompt !== prdBody.trim()) {
+      prompt += `\n\n---\n\n## Additional task context\n\n${taskPrompt}`;
+    }
+  } else if (taskPrompt) {
+    prompt = taskPrompt;
+  } else {
+    prompt = task.title;
+  }
+
   const commentBlock = formatCommentsForPrompt(comments, { nudge: false });
   const parts: string[] = [];
   if (memory) parts.push(memory);
@@ -185,6 +203,65 @@ export function executeTask(
     const finish = () => resolve();
     const fail = (err: Error) => reject(err);
 
+    const runGoalSlashTask = () => {
+      if (!task.goal) {
+        sendTo({ type: 'error', message: 'Goals task has no linked goal file' });
+        task.status = 'todo';
+        task.updatedAt = new Date().toISOString();
+        saveTask(task, workspacePath);
+        broadcast({ type: 'task_update', task });
+        fail(new Error('No goal linked'));
+        return;
+      }
+
+      const command = buildGoalSlashCommand(task.goal);
+      const startedAt = Date.now();
+      appendTaskProgress(
+        task.id,
+        workspacePath,
+        `[${new Date().toISOString()}] Slash command: ${command}\n`,
+        (line) => broadcast({ type: 'progress_append', taskId: task.id, line })
+      );
+
+      runSlashCommand({
+        command,
+        sessionId: task.session_id,
+        workspacePath,
+        onOutput: (text) => {
+          sendTo({ type: 'text', content: text });
+        },
+        onDone: () => {
+          commentTracker.onDone();
+          task.status = pendingFeedback || nudge ? 'todo' : 'review';
+          task.updatedAt = new Date().toISOString();
+          saveTask(task, workspacePath);
+          appendTaskProgress(
+            task.id,
+            workspacePath,
+            `[${new Date().toISOString()}] Goal slash finished — ${task.status} (${Date.now() - startedAt}ms)\n`,
+            (line) => broadcast({ type: 'progress_append', taskId: task.id, line })
+          );
+          sendTo({
+            type: 'done',
+            result: task.status === 'todo'
+              ? 'Returned to todo — review comments'
+              : 'Moved to review — goal command finished',
+          });
+          broadcast({ type: 'task_update', task });
+          finish();
+        },
+        onError: (err) => {
+          commentTracker.onError(err);
+          sendTo({ type: 'error', message: err });
+          task.status = 'todo';
+          task.updatedAt = new Date().toISOString();
+          saveTask(task, workspacePath);
+          broadcast({ type: 'task_update', task });
+          fail(new Error(err));
+        },
+      });
+    };
+
     const runSimpleTask = (freshSession: boolean) => {
       const prompt = buildTaskPrompt(taskId, workspacePath, task, { nudge: useNudgePrompt });
       const sessionId = freshSession ? undefined : task.session_id;
@@ -295,6 +372,11 @@ export function executeTask(
           broadcast({ type: 'task_update', task });
           fail(err instanceof Error ? err : new Error(String(err)));
         });
+      return;
+    }
+
+    if (isGoalTask(task) && task.goal && !useNudgePrompt) {
+      runGoalSlashTask();
       return;
     }
 

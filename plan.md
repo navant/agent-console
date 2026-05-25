@@ -1,4 +1,4 @@
-# Agent Control Panel v2 — Final Plan
+# Coding Harness — Product Plan
 
 ## Core Concepts
 
@@ -24,7 +24,7 @@
     ralph/SKILL.md
     prd/SKILL.md
 
-~/.agent-control-panel/
+~/.coding-harness/
   config.json           { activeWorkspace, registeredWorkspaces[] }
 
 <workspace>/
@@ -85,7 +85,7 @@ Workspace memory:
 ┌──────────────┬──────────────────────────────────────────────────────┐
 │   Sidebar    │  Kanban board (per active workspace)                 │
 │              │  ┌────────┬─────────┬─────────┬──────────┐          │
-│ ▾ MyProject  │  │  Todo  │ Running │ Review  │   Done   │          │
+│ ▾ Workspace  │  │  Todo  │ Running │ Review  │   Done   │          │
 │   workspace▾ │  │        │  ████░  │         │          │          │
 │              │  │ +Task  │         │         │          │          │
 │ ▸ Memory     │  └────────┴─────────┴─────────┴──────────┘          │
@@ -343,7 +343,7 @@ Post-run, memories are written back via claude-mem hooks.
 
 ### Path settings
 
-Stored in `~/.agent-control-panel/config.yaml` under `pathSettings`. Defaults (workspace-relative unless noted):
+Stored in `~/.coding-harness/config.json` under `pathSettings`. Defaults (workspace-relative unless noted):
 
 | Key | Default |
 |-----|---------|

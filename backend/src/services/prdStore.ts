@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { resolveWorkspacePath } from '../config';
+import { resolveWorkspacePath, PRD_TEMPLATE_PATH } from '../config';
 import { PrdFile, TaskConfig } from '../types';
 import { createTask, getPathSettings } from './fileStore';
-import { getDefaultTaskType } from './taskTypesStore';
+import { getDefaultTaskType, getTaskTypeDef, getTaskTypes } from './taskTypesStore';
 
 function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -71,47 +71,67 @@ export function savePrdContent(
   writeFile(resolvePrdFilePath(workspacePath, relativePath), content);
 }
 
+export function deletePrdFile(workspacePath: string, relativePath: string): void {
+  const filePath = resolvePrdFilePath(workspacePath, relativePath);
+  if (!fs.existsSync(filePath)) {
+    throw new Error('PRD file not found');
+  }
+  fs.unlinkSync(filePath);
+}
+
 export function titleFromPrd(content: string, fallback: string): string {
   const match = content.match(/^#\s+(.+)$/m);
   return match?.[1]?.trim() || fallback.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
 }
 
-export function createPlanningTaskForPrd(
-  workspacePath: string,
-  prdPath: string,
-  content: string
-): TaskConfig | null {
-  const taskTypeDef = getDefaultTaskType(workspacePath);
-  if (!taskTypeDef) return null;
+function titleFromFilename(filename: string): string {
+  const base = filename.replace(/\.md$/i, '').replace(/[^a-zA-Z0-9._-]/g, '-');
+  return base
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
-  const title = `Plan: ${titleFromPrd(content, path.basename(prdPath))}`;
-  return createTask(
-    {
-      title,
-      taskType: taskTypeDef.id,
-      prd: prdPath,
-      description: content,
-    },
-    workspacePath
-  );
+export function buildPrdFromTemplate(filename: string): string {
+  const title = titleFromFilename(filename);
+  const safeName = filename.replace(/\.md$/i, '').replace(/[^a-zA-Z0-9._-]/g, '-');
+  const today = new Date().toISOString().slice(0, 10);
+
+  let template = readFile(PRD_TEMPLATE_PATH);
+  if (!template.trim()) {
+    template = `---\nstatus: draft\ncreated: {{date}}\nupdated: {{date}}\n---\n\n# {{title}}\n\n## Overview\n\n## Requirements\n\n`;
+  }
+
+  return template
+    .replace(/\{\{title\}\}/g, title)
+    .replace(/\{\{filename\}\}/g, safeName)
+    .replace(/\{\{date\}\}/g, today);
 }
 
 export function createPrdFile(
   workspacePath: string,
   filename: string,
-  content: string
-): { file: PrdFile; task: TaskConfig | null } {
+  content?: string
+): PrdFile {
   const safe = filename.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/\.md$/i, '') + '.md';
   const rel = safe;
-  savePrdContent(workspacePath, rel, content);
-  const file: PrdFile = {
+  const body = content?.trim() ? content : buildPrdFromTemplate(filename);
+  savePrdContent(workspacePath, rel, body);
+  return {
     id: rel,
     name: safe,
     path: rel,
     updatedAt: new Date().toISOString(),
   };
-  const task = createPlanningTaskForPrd(workspacePath, rel, content);
-  return { file, task };
+}
+
+function defaultPrdTaskType(workspacePath: string): string | undefined {
+  return (
+    getTaskTypeDef(workspacePath, 'planning')?.id
+    ?? getTaskTypes(workspacePath).find(t => t.name.toLowerCase() === 'planning')?.id
+    ?? getDefaultTaskType(workspacePath)?.id
+  );
 }
 
 export function implementPrdAsTask(
@@ -127,6 +147,7 @@ export function implementPrdAsTask(
 ): TaskConfig {
   const content = getPrdContent(workspacePath, data.prdPath);
   const title = data.title?.trim() || titleFromPrd(content, path.basename(data.prdPath));
+  const taskType = data.taskType?.trim() || defaultPrdTaskType(workspacePath);
 
   return createTask(
     {
@@ -134,8 +155,7 @@ export function implementPrdAsTask(
       agent: data.agent,
       workflow: data.workflow,
       skills: data.skills,
-      taskType: data.taskType,
-      description: content,
+      taskType,
       prd: data.prdPath,
     },
     workspacePath

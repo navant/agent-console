@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getActiveWorkspace } from '../services/fileStore';
 import {
   createPrdFile,
+  deletePrdFile,
   getPrdContent,
   implementPrdAsTask,
   listPrdFiles,
@@ -56,13 +57,26 @@ router.put('/file', (req: Request, res: Response) => {
   }
 });
 
+router.delete('/file', (req: Request, res: Response) => {
+  try {
+    const wsPath = requireWorkspace(res);
+    if (!wsPath) return;
+    const filePath = req.query.path as string;
+    if (!filePath) return res.status(400).json({ error: 'path is required' });
+    deletePrdFile(wsPath, filePath);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 router.post('/', (req: Request, res: Response) => {
   try {
     const wsPath = requireWorkspace(res);
     if (!wsPath) return;
     const { filename, content } = req.body as { filename?: string; content?: string };
     if (!filename) return res.status(400).json({ error: 'filename is required' });
-    const file = createPrdFile(wsPath, filename, content ?? `# ${filename}\n\n`);
+    const file = createPrdFile(wsPath, filename, content);
     res.status(201).json(file);
   } catch (err) {
     res.status(500).json({ error: String(err) });

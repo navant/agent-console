@@ -97,7 +97,10 @@ export function savePathSettings(partial: Partial<PathSettings>): PathSettings {
   return mergePathSettings(config.pathSettings);
 }
 
-function wsDir(workspacePath: string, key: Exclude<keyof PathSettings, 'globalAgents' | 'globalSkills'>): string {
+function wsDir(
+  workspacePath: string,
+  key: Exclude<keyof PathSettings, 'globalAgents' | 'globalSkills' | 'globalWorkflows'>
+): string {
   return resolveWorkspacePath(workspacePath, getPathSettings(), key);
 }
 
@@ -179,6 +182,7 @@ function ensureWorkspaceStructure(workspacePath: string): void {
     wsDir(resolved, 'workflows'),
     wsDir(resolved, 'tasks'),
     wsDir(resolved, 'prd'),
+    wsDir(resolved, 'goals'),
     wsDir(resolved, 'memory'),
   ];
   dirs.forEach(d => ensureDir(d));
@@ -260,14 +264,41 @@ export function listAgents(workspacePath?: string): AgentConfig[] {
   const settings = getPathSettings();
   const global = scanAgentsDir(resolveGlobalPath(settings, 'globalAgents'), 'global');
   const wsAgents = workspacePath ? scanAgentsDir(wsDir(workspacePath, 'agents'), 'workspace') : [];
-  const byId = new Map<string, AgentConfig>();
-  global.forEach(a => byId.set(a.id, a));
-  wsAgents.forEach(a => byId.set(a.id, a)); // workspace overrides global
-  return Array.from(byId.values());
+  return [...global, ...wsAgents];
 }
 
 export function getAgent(id: string, workspacePath?: string): AgentConfig | null {
-  return listAgents(workspacePath).find(a => a.id === id) ?? null;
+  if (workspacePath) {
+    const ws = scanAgentsDir(wsDir(workspacePath, 'agents'), 'workspace').find(a => a.id === id);
+    if (ws) return ws;
+  }
+  const settings = getPathSettings();
+  return scanAgentsDir(resolveGlobalPath(settings, 'globalAgents'), 'global').find(a => a.id === id) ?? null;
+}
+
+export function getAgentFileContent(
+  id: string,
+  source: 'global' | 'workspace',
+  workspacePath?: string
+): string {
+  const filePath = getAgentFilePath(id, source, workspacePath);
+  if (!fs.existsSync(filePath)) throw new Error('Agent not found');
+  return readFile(filePath);
+}
+
+export function saveAgentFileContent(id: string, workspacePath: string, content: string): void {
+  writeFile(getAgentFilePath(id, 'workspace', workspacePath), content);
+}
+
+export function createAgentFile(workspacePath: string, id: string, content?: string): void {
+  const body =
+    content ??
+    `---\nname: ${id}\nmodel: claude-sonnet-4-6\ntools:\n  - Bash\n  - Read\n  - Write\n  - Edit\nmemory: true\n---\n\n`;
+  writeFile(getAgentFilePath(id, 'workspace', workspacePath), body);
+  const memPath = getAgentMemoryPath(id, 'workspace', workspacePath);
+  if (!fs.existsSync(memPath)) {
+    writeFile(memPath, `# Memory — ${id}\n\n_No entries yet._\n`);
+  }
 }
 
 export function getAgentFilePath(id: string, source: 'global' | 'workspace', workspacePath?: string): string {
@@ -347,16 +378,17 @@ function listSkillsFromDir(skillsDir: string, source: 'global' | 'workspace'): S
 export function listSkills(workspacePath?: string): SkillConfig[] {
   const global = listSkillsFromDir(resolveGlobalPath(getPathSettings(), 'globalSkills'), 'global');
   const ws = workspacePath ? listSkillsFromDir(wsDir(workspacePath, 'skills'), 'workspace') : [];
-  const byId = new Map<string, SkillConfig>();
-  global.forEach(s => byId.set(s.id, s));
-  ws.forEach(s => byId.set(s.id, s));
-  return Array.from(byId.values());
+  return [...global, ...ws];
+}
+
+function findSkillById(skills: SkillConfig[], id: string): SkillConfig | undefined {
+  return skills.find(s => s.id === id && s.source === 'workspace') ?? skills.find(s => s.id === id);
 }
 
 export function getSkillContent(skillIds: string[], workspacePath?: string): string {
   const skills = listSkills(workspacePath);
   return skillIds
-    .map(id => skills.find(s => s.id === id)?.content ?? '')
+    .map(id => findSkillById(skills, id)?.content ?? '')
     .filter(Boolean)
     .join('\n\n---\n\n');
 }
@@ -366,7 +398,7 @@ export function buildSkillInvocationPrompt(skillIds: string[], workspacePath?: s
   if (skillIds.length === 0) return '';
   const skills = listSkills(workspacePath);
   const lines = skillIds
-    .map(id => skills.find(s => s.id === id))
+    .map(id => findSkillById(skills, id))
     .filter((s): s is SkillConfig => !!s)
     .map(s => `- \`${s.id}\` (${s.name})`);
   if (lines.length === 0) return '';
@@ -389,7 +421,7 @@ export function ensureSkillToolAllowed(tools: string[]): string[] {
 
 // ─── Workflows ───────────────────────────────────────────────────────────────
 
-function parseWorkflowDir(workflowDir: string): WorkflowConfig | null {
+function parseWorkflowDir(workflowDir: string, source: 'global' | 'workspace'): WorkflowConfig | null {
   const workflowMd = path.join(workflowDir, 'WORKFLOW.md');
   if (!fs.existsSync(workflowMd)) return null;
   const raw = readFile(workflowMd);
@@ -402,21 +434,34 @@ function parseWorkflowDir(workflowDir: string): WorkflowConfig | null {
     max_iterations: meta.max_iterations as number | undefined,
     commit_on_story: meta.commit_on_story as boolean | undefined,
     template: body,
+    source,
   };
 }
 
-export function listWorkflows(workspacePath: string): WorkflowConfig[] {
-  const dir = wsDir(workspacePath, 'workflows');
-  if (!fs.existsSync(dir)) return [];
+function listWorkflowsFromDir(workflowsDir: string, source: 'global' | 'workspace'): WorkflowConfig[] {
+  if (!fs.existsSync(workflowsDir)) return [];
   return fs
-    .readdirSync(dir, { withFileTypes: true })
+    .readdirSync(workflowsDir, { withFileTypes: true })
     .filter(d => d.isDirectory())
-    .map(d => parseWorkflowDir(path.join(dir, d.name)))
+    .map(d => parseWorkflowDir(path.join(workflowsDir, d.name), source))
     .filter((w): w is WorkflowConfig => w !== null);
 }
 
-export function getWorkflow(id: string, workspacePath: string): WorkflowConfig | null {
-  return listWorkflows(workspacePath).find(w => w.id === id) ?? null;
+export function listWorkflows(workspacePath?: string): WorkflowConfig[] {
+  const settings = getPathSettings();
+  const global = listWorkflowsFromDir(resolveGlobalPath(settings, 'globalWorkflows'), 'global');
+  const ws = workspacePath ? listWorkflowsFromDir(wsDir(workspacePath, 'workflows'), 'workspace') : [];
+  return [...global, ...ws];
+}
+
+export function getWorkflow(id: string, workspacePath?: string): WorkflowConfig | null {
+  if (workspacePath) {
+    const ws = listWorkflowsFromDir(wsDir(workspacePath, 'workflows'), 'workspace').find(w => w.id === id);
+    if (ws) return ws;
+  }
+  return listWorkflowsFromDir(resolveGlobalPath(getPathSettings(), 'globalWorkflows'), 'global').find(
+    w => w.id === id
+  ) ?? null;
 }
 
 export function saveWorkflow(workflow: WorkflowConfig, workspacePath: string): void {
@@ -434,6 +479,75 @@ export function saveWorkflow(workflow: WorkflowConfig, workspacePath: string): v
 export function deleteWorkflow(id: string, workspacePath: string): void {
   const dir = path.join(wsDir(workspacePath, 'workflows'), id);
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+}
+
+export function getSkillFilePath(
+  id: string,
+  source: 'global' | 'workspace',
+  workspacePath?: string
+): string {
+  if (source === 'global') {
+    return path.join(resolveGlobalPath(getPathSettings(), 'globalSkills'), id, 'SKILL.md');
+  }
+  if (!workspacePath) throw new Error('workspace path required');
+  return path.join(wsDir(workspacePath, 'skills'), id, 'SKILL.md');
+}
+
+export function getSkillFileContent(
+  id: string,
+  source: 'global' | 'workspace',
+  workspacePath?: string
+): string {
+  const filePath = getSkillFilePath(id, source, workspacePath);
+  if (!fs.existsSync(filePath)) throw new Error('Skill not found');
+  return readFile(filePath);
+}
+
+export function saveSkillFileContent(id: string, workspacePath: string, content: string): void {
+  const filePath = getSkillFilePath(id, 'workspace', workspacePath);
+  writeFile(filePath, content);
+}
+
+export function getWorkflowFilePath(
+  id: string,
+  source: 'global' | 'workspace',
+  workspacePath?: string
+): string {
+  if (source === 'global') {
+    return path.join(resolveGlobalPath(getPathSettings(), 'globalWorkflows'), id, 'WORKFLOW.md');
+  }
+  if (!workspacePath) throw new Error('workspace path required');
+  return path.join(wsDir(workspacePath, 'workflows'), id, 'WORKFLOW.md');
+}
+
+export function getWorkflowFileContent(
+  id: string,
+  source: 'global' | 'workspace',
+  workspacePath?: string
+): string {
+  const filePath = getWorkflowFilePath(id, source, workspacePath);
+  if (!fs.existsSync(filePath)) throw new Error('Workflow not found');
+  return readFile(filePath);
+}
+
+export function saveWorkflowFileContent(id: string, workspacePath: string, content: string): void {
+  writeFile(getWorkflowFilePath(id, 'workspace', workspacePath), content);
+}
+
+export function createSkillFolder(workspacePath: string, id: string, content?: string): void {
+  const dir = path.join(wsDir(workspacePath, 'skills'), id);
+  ensureDir(dir);
+  const body = content ?? `---\nname: ${id}\ndescription: \n---\n\n# ${id}\n`;
+  writeFile(path.join(dir, 'SKILL.md'), body);
+}
+
+export function createWorkflowFolder(workspacePath: string, id: string, content?: string): void {
+  const dir = path.join(wsDir(workspacePath, 'workflows'), id);
+  ensureDir(dir);
+  const body =
+    content ??
+    `---\nname: ${id}\ntype: single\n---\n\n{{prompt}}\n\nWorkspace memory:\n{{memory}}\n`;
+  writeFile(path.join(dir, 'WORKFLOW.md'), body);
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
@@ -535,6 +649,7 @@ export function createTask(
     description?: string;
     type?: TaskType;
     prd?: string;
+    goal?: string;
     taskType?: string;
   },
   workspacePath: string
@@ -561,6 +676,7 @@ export function createTask(
     skills: resolved.skills,
     ...(resolved.taskType ? { taskType: resolved.taskType } : {}),
     ...(data.prd ? { prd: data.prd } : {}),
+    ...(data.goal ? { goal: data.goal } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -569,7 +685,7 @@ export function createTask(
   ensureDir(dir);
   saveTask(task, workspacePath);
 
-  if (data.description) {
+  if (data.description && !data.prd && !data.goal) {
     saveTaskPrompt(id, workspacePath, data.description);
   }
 

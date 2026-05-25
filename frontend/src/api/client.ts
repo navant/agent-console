@@ -13,6 +13,7 @@ import {
   WorkspacesResponse,
   PathSettings,
   PrdFile,
+  GoalFile,
   CreateWorkspaceResponse,
   WSServerMessage,
 } from '../types';
@@ -36,6 +37,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConfig = () => request<AppConfig>('/config');
 export const updatePathSettings = (paths: Partial<PathSettings>) =>
   request<PathSettings>('/config/paths', { method: 'PUT', body: JSON.stringify(paths) });
+export interface SetupHarnessResult {
+  workspacePath: string;
+  agentsDir: string;
+  skillsDir: string;
+  agents: { copied: string[]; skipped: string[] };
+  skills: { copied: string[]; skipped: string[] };
+}
+export const setupHarness = () =>
+  request<SetupHarnessResult>('/config/setup', { method: 'POST' });
 export const switchWorkspace = (workspaceId: string) =>
   request<{ activeWorkspace: string; workspace: WorkspaceConfig }>('/config/workspace', {
     method: 'POST',
@@ -44,6 +54,20 @@ export const switchWorkspace = (workspaceId: string) =>
 
 // ─── Agents ───────────────────────────────────────────────────────────────────
 export const getAgents = () => request<AgentConfig[]>('/agents');
+export const getAgentFile = (id: string, source: 'global' | 'workspace') =>
+  request<{ id: string; source: string; path: string; content: string }>(
+    `/agents/${encodeURIComponent(id)}/file?source=${source}`
+  );
+export const saveAgentFile = (id: string, content: string) =>
+  request<{ id: string; path: string; content: string }>(`/agents/${encodeURIComponent(id)}/file`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+export const createAgentFile = (id: string, content?: string) =>
+  request<AgentConfig>('/agents', {
+    method: 'POST',
+    body: JSON.stringify({ id, name: id, source: 'workspace', content }),
+  });
 export const createAgent = (data: Partial<AgentConfig> & { source?: 'global' | 'workspace' }) =>
   request<AgentConfig>('/agents', { method: 'POST', body: JSON.stringify(data) });
 export const updateAgent = (id: string, data: Partial<AgentConfig>) =>
@@ -87,8 +111,10 @@ export const savePrdFile = (path: string, content: string) =>
     method: 'PUT',
     body: JSON.stringify({ path, content }),
   });
+export const deletePrdFile = (path: string) =>
+  request<{ ok: boolean }>(`/prd/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
 export const createPrd = (filename: string, content?: string) =>
-  request<{ file: PrdFile; task: TaskConfig | null }>('/prd', {
+  request<PrdFile>('/prd', {
     method: 'POST',
     body: JSON.stringify({ filename, content }),
   });
@@ -100,6 +126,32 @@ export const implementPrd = (data: {
   title?: string;
   taskType?: string;
 }) => request<TaskConfig>('/prd/implement', { method: 'POST', body: JSON.stringify(data) });
+
+// ─── Goals ────────────────────────────────────────────────────────────────────
+export const getGoalFiles = () => request<GoalFile[]>('/goals');
+export const getGoalFile = (path: string) =>
+  request<{ path: string; content: string }>(`/goals/file?path=${encodeURIComponent(path)}`);
+export const saveGoalFile = (path: string, content: string) =>
+  request<{ path: string; content: string }>('/goals/file', {
+    method: 'PUT',
+    body: JSON.stringify({ path, content }),
+  });
+export const deleteGoalFile = (path: string) =>
+  request<{ ok: boolean }>(`/goals/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+export const createGoal = (filename: string, content?: string) =>
+  request<GoalFile>('/goals', {
+    method: 'POST',
+    body: JSON.stringify({ filename, content }),
+  });
+export const invokeGoal = (data: {
+  goalPath: string;
+  agent?: string;
+  workflow?: string;
+  skills?: string[];
+  title?: string;
+  taskType?: string;
+}) => request<TaskConfig>('/goals/invoke', { method: 'POST', body: JSON.stringify(data) });
+
 export const updateTask = (id: string, data: Partial<TaskConfig> & { description?: string }) =>
   request<TaskConfig>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteTask = (id: string) =>
@@ -142,10 +194,33 @@ export const stopAutoQueue = () => wsManager.send({ type: 'auto_queue_stop' });
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
 export const getSkills = () => request<SkillConfig[]>('/skills');
+export const getSkillFile = (id: string, source: 'global' | 'workspace') =>
+  request<{ id: string; source: string; path: string; content: string }>(
+    `/skills/${encodeURIComponent(id)}/file?source=${source}`
+  );
+export const saveSkillFile = (id: string, content: string) =>
+  request<{ id: string; path: string; content: string }>(`/skills/${encodeURIComponent(id)}/file`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+export const createSkill = (id: string, content?: string) =>
+  request<{ id: string; path: string; content: string }>('/skills', {
+    method: 'POST',
+    body: JSON.stringify({ id, content }),
+  });
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
 export const getWorkflows = () => request<WorkflowConfig[]>('/workflows');
-export const createWorkflow = (data: Partial<WorkflowConfig>) =>
+export const getWorkflowFile = (id: string, source: 'global' | 'workspace') =>
+  request<{ id: string; source: string; path: string; content: string }>(
+    `/workflows/${encodeURIComponent(id)}/file?source=${source}`
+  );
+export const saveWorkflowFile = (id: string, content: string) =>
+  request<{ id: string; path: string; content: string }>(`/workflows/${encodeURIComponent(id)}/file`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+export const createWorkflow = (data: Partial<WorkflowConfig> & { content?: string }) =>
   request<WorkflowConfig>('/workflows', { method: 'POST', body: JSON.stringify(data) });
 export const updateWorkflow = (id: string, data: Partial<WorkflowConfig>) =>
   request<WorkflowConfig>(`/workflows/${id}`, { method: 'PUT', body: JSON.stringify(data) });

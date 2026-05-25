@@ -6,13 +6,14 @@ import ThemeToggle from '../common/ThemeToggle';
 import { WorkspaceViewId } from '../../types';
 
 const NAV: { view: WorkspaceViewId; label: string; glyph: string }[] = [
+  { view: 'goals', label: 'Goals', glyph: '◎' },
+  { view: 'prd', label: 'Planning', glyph: '≡' },
   { view: 'tasks', label: 'Tasks', glyph: '▦' },
   { view: 'chat', label: 'Chat', glyph: '◻' },
   { view: 'memory', label: 'Memory', glyph: '◇' },
-  { view: 'agents', label: 'Agents', glyph: '◎' },
+  { view: 'agents', label: 'Agents', glyph: '◉' },
   { view: 'skills', label: 'Skills', glyph: '◈' },
   { view: 'workflows', label: 'Workflows', glyph: '↻' },
-  { view: 'prd', label: 'PRD', glyph: '≡' },
   { view: 'settings', label: 'Settings', glyph: '⚙' },
 ];
 
@@ -35,7 +36,7 @@ export default function SidebarNav() {
       <div className="brand">
         <div className="brand-mark">◆</div>
         <div className="brand-text">
-          <div className="brand-title">Agent Control</div>
+          <div className="brand-title">Coding Harness</div>
           <div className="brand-sub">
             {active?.name ?? 'no workspace'} · {wsConnected ? 'connected' : '…'}
           </div>

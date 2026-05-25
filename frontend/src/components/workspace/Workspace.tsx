@@ -2,17 +2,15 @@ import React from 'react';
 import { useStore } from '../../store/useStore';
 import { WorkspaceViewId } from '../../types';
 import KanbanBoard from '../kanban/KanbanBoard';
+import TaskDetailHost from '../kanban/TaskDetailHost';
 import ChatPanel from '../chat/ChatPanel';
 import MemoryView from '../views/MemoryView';
-import AgentsSection from '../sidebar/AgentsSection';
-import SkillsSection from '../sidebar/SkillsSection';
-import WorkflowsSection from '../sidebar/WorkflowsSection';
+import AgentsView from '../views/AgentsView';
 import PRDView from '../views/PRDView';
+import GoalsView from '../views/GoalsView';
+import SkillsView from '../views/SkillsView';
+import WorkflowsView from '../views/WorkflowsView';
 import SettingsView from '../views/SettingsView';
-
-function PanelSection({ children }: { children: React.ReactNode }) {
-  return <div className="panel-view">{children}</div>;
-}
 
 function ViewContent({ view }: { view: WorkspaceViewId }) {
   switch (view) {
@@ -23,39 +21,19 @@ function ViewContent({ view }: { view: WorkspaceViewId }) {
     case 'memory':
       return <MemoryView />;
     case 'agents':
-      return (
-        <PanelSection>
-          <div className="panel-view-hd">
-            <h2>Agents</h2>
-            <p className="muted">Global and workspace personas</p>
-          </div>
-          <AgentsSection panel />
-        </PanelSection>
-      );
+      return <AgentsView />;
     case 'skills':
-      return (
-        <PanelSection>
-          <div className="panel-view-hd">
-            <h2>Skills</h2>
-            <p className="muted">Reusable prompt components from disk</p>
-          </div>
-          <SkillsSection panel />
-        </PanelSection>
-      );
+      return <SkillsView />;
     case 'workflows':
-      return (
-        <PanelSection>
-          <div className="panel-view-hd">
-            <h2>Workflows</h2>
-            <p className="muted">Execution policies per workspace</p>
-          </div>
-          <WorkflowsSection panel />
-        </PanelSection>
-      );
+      return <WorkflowsView />;
     case 'prd':
       return <PRDView />;
+    case 'goals':
+      return <GoalsView />;
     case 'settings':
       return <SettingsView />;
+    case 'task':
+      return null;
     default:
       return null;
   }
@@ -69,43 +47,55 @@ export default function Workspace() {
   const closeWorkspaceTab = useStore(s => s.closeWorkspaceTab);
   const setActiveTabId = useStore(s => s.setActiveTabId);
   const togglePinnedDock = useStore(s => s.togglePinnedDock);
+  const tasks = useStore(s => s.tasks);
 
   const activeTab = workspaceTabs.find(t => t.id === activeTabId) ?? workspaceTabs[0];
   const activeView = activeTab?.view ?? 'tasks';
   const tasksInDock = pinnedDock === 'tasks';
-  const showTasksInPane = activeView === 'tasks' && !tasksInDock;
+  const isTaskTab = activeTab?.view === 'task' && !!activeTab.taskId;
 
   return (
     <div className="workspace" data-screen-label="workspace">
       <header className="workspace-tabs">
         <div className="workspace-tabs-list">
-          {workspaceTabs.map(tab => (
-            <div
-              key={tab.id}
-              className={'workspace-tab' + (tab.id === activeTabId ? ' is-active' : '')}
-            >
-              <button
-                type="button"
-                className="workspace-tab-btn"
-                onClick={() => setActiveTabId(tab.id)}
+          {workspaceTabs.map(tab => {
+            const task = tab.taskId ? tasks.find(t => t.id === tab.taskId) : null;
+            return (
+              <div
+                key={tab.id}
+                className={
+                  'workspace-tab'
+                  + (tab.id === activeTabId ? ' is-active' : '')
+                  + (tab.view === 'task' ? ' workspace-tab--task' : '')
+                }
               >
-                {tab.label}
-              </button>
-              {tab.closable && (
                 <button
                   type="button"
-                  className="workspace-tab-close"
-                  onClick={() => closeWorkspaceTab(tab.id)}
-                  aria-label={`Close ${tab.label}`}
+                  className="workspace-tab-btn"
+                  onClick={() => setActiveTabId(tab.id)}
+                  title={tab.view === 'task' ? tab.label : undefined}
                 >
-                  ✕
+                  {tab.view === 'task' && task && (
+                    <span className={'status-dot status-' + task.status} />
+                  )}
+                  {tab.label}
                 </button>
-              )}
-            </div>
-          ))}
+                {tab.closable && (
+                  <button
+                    type="button"
+                    className="workspace-tab-close"
+                    onClick={() => closeWorkspaceTab(tab.id)}
+                    aria-label={`Close ${tab.label}`}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
         <div className="workspace-tabs-actions">
-          {activeView === 'tasks' && (
+          {(activeView === 'tasks' || isTaskTab) && (
             <button
               type="button"
               className={'btn btn-sm' + (tasksInDock ? ' is-on' : '')}
@@ -133,15 +123,15 @@ export default function Workspace() {
         )}
 
         <div className="workspace-pane">
-          {activeView === 'tasks' && tasksInDock ? (
+          {isTaskTab && activeTab.taskId ? (
+            <TaskDetailHost taskId={activeTab.taskId} tabId={activeTab.id} />
+          ) : activeView === 'tasks' && tasksInDock ? (
             <div className="workspace-empty-hint">
               <p>Kanban is pinned in the side panel.</p>
               <button type="button" className="btn" onClick={() => togglePinnedDock('tasks')}>
                 Unpin to show here
               </button>
             </div>
-          ) : showTasksInPane || activeView !== 'tasks' ? (
-            <ViewContent view={activeView} />
           ) : (
             <ViewContent view={activeView} />
           )}

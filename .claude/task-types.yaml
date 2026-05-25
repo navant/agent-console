@@ -17,3 +17,9 @@ types:
     skills: []
     workflow: single-shot
     default: false
+  - id: goals
+    name: Goals
+    agent: ''
+    skills: []
+    workflow: single-shot
+    default: false

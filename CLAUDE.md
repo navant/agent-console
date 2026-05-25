@@ -1,24 +1,32 @@
-# Agent Control Panel
+# Claude Code — Coding Harness
 
-Local browser UI that wraps Claude Code CLI. No auth, no database — YAML + markdown files on disk.
+@AGENTS.md
 
-## Stack
-- **Backend**: Node.js + TypeScript + Express + ws (port 3001)
-- **Frontend**: React + Vite + Tailwind + Zustand (port 3000)
-- Vite proxies `/api` and `/ws` → backend
+## Claude-specific
 
-## Data
-All data lives in `~/.agent-control-panel/` (see `backend/src/config.ts` for paths).
+- Use the **Skill** tool for task-configured skills (`buildSkillInvocationPrompt` in `backend/src/services/fileStore.ts`).
+- **Goals tasks** run via PTY slash: `/goal goals/<file>.md` (`goalsStore.ts` + `ptyRunner.ts`).
+- **Planning tasks** inject PRD markdown at run time (`getPrdContent` in `taskRunner.ts`).
 
-## Dev
+## Quick commands
+
 ```bash
-npm run dev          # starts backend + frontend concurrently
-npm run dev:backend  # backend only
-npm run dev:frontend # frontend only
+npm run dev
+cd backend && npm run dev
+cd frontend && npm run dev
 ```
 
-## Key constraints
-- No database — YAML + markdown only
-- No auth — localhost only
-- Claude CLI (`claude`) must be in PATH and authenticated
-- Skills are read-only from `~/.claude/agents/`
+## Where to look
+
+| Topic | File(s) |
+|-------|---------|
+| Paths & defaults | `backend/src/config.ts` |
+| Task execution | `backend/src/services/taskRunner.ts`, `ralphRunner.ts` |
+| Setup templates | `backend/src/services/setupStore.ts`, `POST /api/config/setup` |
+| Roadmap | `plan.md`, `README.md` |
+
+## Constraints
+
+- No database; no auth.
+- `claude` on PATH for runs.
+- Path-scoped rules: `.claude/rules/`.

@@ -48,6 +48,7 @@ function serializeTaskMarkdown(task: TaskConfig, body: string): string {
   };
   if (task.skills.length > 0) frontmatter.skills = task.skills;
   if (task.prd) frontmatter.prd = task.prd;
+  if (task.goal) frontmatter.goal = task.goal;
   if (task.taskType) frontmatter.taskType = task.taskType;
 
   const yamlBlock = yaml.dump(frontmatter, { lineWidth: -1, noRefs: true }).trim();
@@ -101,6 +102,7 @@ export function mergeTaskFromMarkdownContent(content: string, task: TaskConfig):
       ? frontmatter.skills.filter((s): s is string => typeof s === 'string')
       : task.skills,
     prd: typeof frontmatter.prd === 'string' ? frontmatter.prd : task.prd,
+    goal: typeof frontmatter.goal === 'string' ? frontmatter.goal : task.goal,
     taskType: typeof frontmatter.taskType === 'string' ? frontmatter.taskType : task.taskType,
     updatedAt: new Date().toISOString(),
   };

@@ -46,6 +46,10 @@ export interface SlashCommandOpts {
 
 let activeProc: pty.IPty | null = null;
 
+export function isSlashRunning(): boolean {
+  return activeProc !== null;
+}
+
 export function stopRalph(): void {
   if (activeProc) { try { activeProc.kill(); } catch {} activeProc = null; }
 }

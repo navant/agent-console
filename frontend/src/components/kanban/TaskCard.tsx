@@ -80,6 +80,9 @@ export default function TaskCard({
       {task.prd && (
         <div className="task-prd-badge mono" title={task.prd}>PRD</div>
       )}
+      {task.goal && (
+        <div className="task-prd-badge mono" title={task.goal}>GOAL</div>
+      )}
       <div className="task-ft">
         <div className="task-meta">
           {task.agent ? (
@@ -97,40 +100,50 @@ export default function TaskCard({
         <div className="task-actions">
           {task.session_id && onContinueInChat && (
             <button
-              className="task-chat"
+              type="button"
+              className="task-act task-act--chat"
               onClick={e => onContinueInChat(task.id, e)}
-              title="Continue in chat with active session"
+              title="Continue in chat"
+              aria-label="Continue in chat"
             >
-              💬 Chat
+              💬
             </button>
           )}
           <button
-            className="task-edit"
+            type="button"
+            className="task-act"
             onClick={e => {
               e.stopPropagation();
               onEdit(task.id);
             }}
+            title="Edit task"
+            aria-label="Edit task"
           >
-            ✎ Edit
+            ✎
           </button>
           {canNudge && onNudge && (
             <button
-              className="task-nudge"
+              type="button"
+              className="task-act task-act--nudge"
               onClick={e => onNudge(task.id, e)}
-              title="Nudge agent to continue this task"
+              title="Nudge agent"
+              aria-label="Nudge agent"
             >
-              ↻ Nudge
+              ↻
             </button>
           )}
           {!isInactive && (
             <button
-              className={'task-run' + (isRunning ? ' is-running' : '')}
+              type="button"
+              className={'task-act task-act--run' + (isRunning ? ' is-running' : '')}
               onClick={e => {
                 e.stopPropagation();
                 onAction(task.id);
               }}
+              title={isRunning ? 'Stop task' : 'Run task'}
+              aria-label={isRunning ? 'Stop task' : 'Run task'}
             >
-              {isRunning ? '■ Stop' : '▶ Run'}
+              {isRunning ? '■' : '▶'}
             </button>
           )}
         </div>

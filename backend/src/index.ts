@@ -12,6 +12,7 @@ import workflowsRouter from './routes/workflows';
 import memoryRouter from './routes/memory';
 import browseRouter from './routes/browse';
 import prdRouter from './routes/prd';
+import goalsRouter from './routes/goals';
 import taskTypesRouter from './routes/taskTypes';
 import {
   getActiveWorkspace,
@@ -46,6 +47,7 @@ app.use('/api/memory', memoryRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/browse', browseRouter);
 app.use('/api/prd', prdRouter);
+app.use('/api/goals', goalsRouter);
 app.use('/api/task-types', taskTypesRouter);
 
 app.get('/api/health', (_req, res) => {

@@ -1,9 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import TaskCard from './TaskCard';
-import TaskDetail from './TaskDetail';
 import EditTaskModal from './EditTaskModal';
-import { wsManager, updateTask, startAutoQueue, stopAutoQueue, runTask } from '../../api/client';
+import { wsManager, updateTask, deleteTask, startAutoQueue, stopAutoQueue, runTask } from '../../api/client';
 import { TaskConfig } from '../../types';
 import {
   COLUMNS,
@@ -22,15 +21,16 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
   const tasks = useStore(s => s.tasks);
   const selectedTaskId = useStore(s => s.selectedTaskId);
   const searchQuery = useStore(s => s.searchQuery);
-  const showTaskDetail = useStore(s => s.showTaskDetail);
   const setSelectedTaskId = useStore(s => s.setSelectedTaskId);
+  const openTaskTab = useStore(s => s.openTaskTab);
   const setChatAgent = useStore(s => s.setChatAgent);
   const setModal = useStore(s => s.setModal);
   const setSearchQuery = useStore(s => s.setSearchQuery);
   const storeUpdateTask = useStore(s => s.updateTask);
+  const removeTask = useStore(s => s.removeTask);
   const setRunning = useStore(s => s.setRunning);
+  const running = useStore(s => s.running);
   const clearMessages = useStore(s => s.clearMessages);
-  const setShowTaskDetail = useStore(s => s.setShowTaskDetail);
   const activeWorkspaceId = useStore(s => s.activeWorkspaceId);
   const autoQueue = useStore(s => s.autoQueue);
   const loadWorkspaceData = useStore(s => s.loadWorkspaceData);
@@ -88,18 +88,37 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
   };
 
   const handleSelect = (id: string) => {
-    setSelectedTaskId(id);
-    setShowTaskDetail(true);
-    const task = tasks.find(t => t.id === id);
-    if (task) {
-      setChatAgent(task.agent);
-      clearMessages();
-    }
+    openTaskTab(id);
   };
 
   const handleEdit = (id: string) => {
     setSelectedTaskId(id);
     setEditTaskId(id);
+  };
+
+  const handleDelete = async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    if (
+      !window.confirm(
+        `Delete task "${task.title}" (${task.id})?\n\nThis removes the task folder from disk. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    if (task.status === 'running' || running) {
+      wsManager.send({ type: 'stop' });
+      setRunning(false);
+    }
+
+    try {
+      await deleteTask(id);
+      removeTask(id);
+      if (editTaskId === id) setEditTaskId(null);
+    } catch (err) {
+      window.alert(`Failed to delete task: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleAction = async (id: string) => {
@@ -122,8 +141,7 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
       if (task.session_id) {
         void continueTaskInChat(id);
       } else {
-        setSelectedTaskId(id);
-        setShowTaskDetail(true);
+        openTaskTab(id);
       }
     }
   };
@@ -142,10 +160,7 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
     e?.stopPropagation();
     const task = tasks.find(t => t.id === id);
     if (!task || task.status === 'running' || task.status === 'done' || task.status === 'archive') return;
-    setSelectedTaskId(id);
-    setShowTaskDetail(true);
-    setChatAgent(task.agent);
-    clearMessages();
+    openTaskTab(id);
     setRunning(true);
     runTask(id, true);
   };
@@ -278,22 +293,11 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
         </div>
       </section>
 
-      {showTaskDetail && selectedTaskId && (
-        <TaskDetail
-          taskId={selectedTaskId}
-          onClose={() => setShowTaskDetail(false)}
-          onEdit={() => setEditTaskId(selectedTaskId)}
-          onMoveStatus={(status) => {
-            const task = tasks.find(t => t.id === selectedTaskId);
-            if (task) void moveTaskToColumn(task, statusToColumn(status));
-          }}
-        />
-      )}
-
       <EditTaskModal
         open={editTaskId !== null}
         taskId={editTaskId}
         onClose={() => setEditTaskId(null)}
+        onDelete={editTaskId ? () => void handleDelete(editTaskId) : undefined}
       />
     </section>
   );

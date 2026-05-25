@@ -31,6 +31,14 @@ const DEFAULT_TYPES: TaskTypeDef[] = [
     workflow: 'single-shot',
     default: false,
   },
+  {
+    id: 'goals',
+    name: 'Goals',
+    agent: '',
+    skills: [],
+    workflow: 'single-shot',
+    default: false,
+  },
 ];
 
 function configPath(workspacePath: string): string {
@@ -39,7 +47,7 @@ function configPath(workspacePath: string): string {
 
 function normalizeTypes(types: TaskTypeDef[]): TaskTypeDef[] {
   let defaultSet = false;
-  return types.map(t => {
+  const normalized = types.map(t => {
     const entry: TaskTypeDef = {
       id: t.id.trim(),
       name: t.name.trim() || t.id.trim(),
@@ -51,6 +59,14 @@ function normalizeTypes(types: TaskTypeDef[]): TaskTypeDef[] {
     if (entry.default) defaultSet = true;
     return entry;
   });
+
+  if (!defaultSet && normalized.length > 0) {
+    const planning = normalized.find(t => t.id === 'planning');
+    if (planning) planning.default = true;
+    else normalized[0].default = true;
+  }
+
+  return normalized;
 }
 
 export function getTaskTypes(workspacePath: string): TaskTypeDef[] {
@@ -124,8 +140,8 @@ export function resolveTaskTypeFields(
 
   return {
     taskType: def.id,
-    agent: def.agent ?? '',
+    agent: def.agent || input.agent || '',
     workflow: def.workflow || input.workflow?.trim() || 'single-shot',
-    skills: [...(def.skills ?? [])],
+    skills: def.skills?.length ? [...def.skills] : [...(input.skills ?? [])],
   };
 }

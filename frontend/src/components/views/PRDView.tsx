@@ -4,6 +4,7 @@ import {
   getPrdFiles,
   getPrdFile,
   savePrdFile,
+  deletePrdFile,
   createPrd,
 } from '../../api/client';
 import { PrdFile } from '../../types';
@@ -16,8 +17,6 @@ export default function PRDView() {
   const pendingPrdPath = useStore(s => s.pendingPrdPath);
   const clearPendingPrdPath = useStore(s => s.clearPendingPrdPath);
   const pathSettings = useStore(s => s.pathSettings);
-  const addTask = useStore(s => s.addTask);
-  const openWorkspaceTab = useStore(s => s.openWorkspaceTab);
 
   const [files, setFiles] = useState<PrdFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -70,18 +69,39 @@ export default function PRDView() {
   const newPrd = async () => {
     const name = window.prompt('PRD filename (e.g. feature-auth)');
     if (!name) return;
-    const result = await createPrd(name, `# ${name}\n\n## Overview\n\n## Requirements\n\n`);
-    loadList();
-    openFile(result.file.path);
-    if (result.task) {
-      addTask(result.task);
-      openWorkspaceTab('tasks');
+    try {
+      const file = await createPrd(name);
+      loadList();
+      openFile(file.path);
+    } catch (err) {
+      console.error('Failed to create PRD:', err);
+      window.alert(`Failed to create PRD: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const implement = () => {
     if (!selected) return;
     setShowImplement(true);
+  };
+
+  const removePrd = async () => {
+    if (!selected) return;
+    const name = selected.split('/').pop() ?? selected;
+    if (
+      !window.confirm(
+        `Delete "${name}"?\n\nThis removes the file from disk. Tasks that link to this PRD will keep their link but the file will be gone.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await deletePrdFile(selected);
+      setSelected(null);
+      setContent('');
+      loadList();
+    } catch (err) {
+      window.alert(`Failed to delete PRD: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const filtered = files.filter(f =>
@@ -96,10 +116,10 @@ export default function PRDView() {
     <div className="prd-view">
       <header className="panel-view-hd">
         <div>
-          <h2>PRD</h2>
-          <p className="muted">Markdown files in <span className="mono">{pathSettings?.prd ?? DEFAULT_PATH_SETTINGS.prd}</span></p>
+          <h2>Planning</h2>
+          <p className="muted">PRD specs in <span className="mono">{pathSettings?.prd ?? DEFAULT_PATH_SETTINGS.prd}</span></p>
         </div>
-        <button type="button" className="btn btn-primary btn-sm" onClick={newPrd}>+ New PRD</button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={newPrd}>+ New plan</button>
       </header>
 
       <div className="prd-view-body">
@@ -131,6 +151,9 @@ export default function PRDView() {
                 <button type="button" className="btn btn-primary btn-sm" onClick={implement}>
                   ▶ Implement as task
                 </button>
+                <button type="button" className="btn btn-sm danger" onClick={removePrd}>
+                  Delete PRD
+                </button>
               </div>
               <MarkdownEditor
                 path={selected}
@@ -144,7 +167,7 @@ export default function PRDView() {
           ) : (
             <div className="memory-editor-empty">
               <p>Select a PRD or create a new one</p>
-              <p className="muted">PRDs are markdown specs linked to tasks at creation time.</p>
+              <p className="muted">PRDs are markdown specs. Use “Implement as task” when you are ready to run one.</p>
             </div>
           )}
         </div>

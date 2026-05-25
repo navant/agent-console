@@ -25,8 +25,7 @@ export default function App() {
   const appendTaskComment = useStore(s => s.appendTaskComment);
   const setAutomation = useStore(s => s.setAutomation);
   const setTaskPlan = useStore(s => s.setTaskPlan);
-  const selectedTaskId = useStore(s => s.selectedTaskId);
-  const setSelectedTaskId = useStore(s => s.setSelectedTaskId);
+  const openTaskTab = useStore(s => s.openTaskTab);
 
   useEffect(() => {
     loadAll();
@@ -107,7 +106,7 @@ export default function App() {
       <CreateTaskModal
         open={modal === 'task'}
         onClose={() => setModal(null)}
-        onCreated={(id) => setSelectedTaskId(id)}
+        onCreated={(id) => openTaskTab(id)}
       />
       <WorkflowModal open={modal === 'workflow'} onClose={() => setModal(null)} />
       <AgentModal open={modal === 'agent'} onClose={() => setModal(null)} />

@@ -5,10 +5,8 @@ import { useStore } from '../../store/useStore';
 export default function TasksSection({ compact }: { compact?: boolean }) {
   const tasks = useStore(s => s.tasks);
   const selectedTaskId = useStore(s => s.selectedTaskId);
-  const setSelectedTaskId = useStore(s => s.setSelectedTaskId);
   const setChatAgent = useStore(s => s.setChatAgent);
-  const setShowTaskDetail = useStore(s => s.setShowTaskDetail);
-  const openWorkspaceTab = useStore(s => s.openWorkspaceTab);
+  const openTaskTab = useStore(s => s.openTaskTab);
   const expanded = useStore(s => s.expandedSections.tasks ?? true);
   const toggleSection = useStore(s => s.toggleSection);
 
@@ -17,10 +15,8 @@ export default function TasksSection({ compact }: { compact?: boolean }) {
       key={task.id}
       className={'side-row' + (selectedTaskId === task.id ? ' is-selected' : '')}
       onClick={() => {
-        setSelectedTaskId(task.id);
-        setShowTaskDetail(true);
+        openTaskTab(task.id);
         setChatAgent(task.agent);
-        openWorkspaceTab('tasks');
       }}
     >
       <span className={'status-dot status-' + task.status} />

@@ -8,6 +8,7 @@ interface MarkdownEditorProps {
   onSave: () => void | Promise<void>;
   saving?: boolean;
   loading?: boolean;
+  readOnly?: boolean;
 }
 
 export default function MarkdownEditor({
@@ -17,6 +18,7 @@ export default function MarkdownEditor({
   onSave,
   saving,
   loading,
+  readOnly,
 }: MarkdownEditorProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
 
@@ -34,17 +36,21 @@ export default function MarkdownEditor({
           >
             View
           </button>
-          <button
-            type="button"
-            className={'btn btn-sm' + (mode === 'edit' ? ' is-on' : '')}
-            onClick={() => setMode('edit')}
-          >
-            Edit
-          </button>
-          {mode === 'edit' && (
-            <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={saving || loading}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                className={'btn btn-sm' + (mode === 'edit' ? ' is-on' : '')}
+                onClick={() => setMode('edit')}
+              >
+                Edit
+              </button>
+              {mode === 'edit' && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={saving || loading}>
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              )}
+            </>
           )}
         </div>
       </header>

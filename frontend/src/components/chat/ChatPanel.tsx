@@ -16,6 +16,7 @@ const SLASH_COMMANDS = [
   { cmd: '/review',      desc: 'Review recent code changes',                local: false },
   { cmd: '/init',        desc: 'Initialize CLAUDE.md in workspace',         local: false },
   { cmd: '/memory',      desc: 'Manage Claude memory files',                local: false },
+  { cmd: '/goal',        desc: 'Run goal skill (goals/*.md)',               local: false },
   { cmd: '/help',        desc: 'Show available slash commands',             local: false },
   { cmd: '/status',      desc: 'Show account and session status',           local: false },
   { cmd: '/cost',        desc: 'Show API usage cost for this session',      local: false },
@@ -30,7 +31,7 @@ const SLASH_COMMANDS = [
   { cmd: '/vim',         desc: 'Toggle vim keybindings',                    local: false },
 ];
 
-export default function ChatPanel() {
+export default function ChatPanel({ embedded = false }: { embedded?: boolean }) {
   const agents              = useStore(s => s.agents);
   const tasks               = useStore(s => s.tasks);
   const workspaces          = useStore(s => s.workspaces);
@@ -238,16 +239,24 @@ export default function ChatPanel() {
   );
 
   return (
-    <section className="chat">
+    <section className={'chat' + (embedded ? ' chat--embedded' : '')}>
       {/* ── Header ── */}
       <header className="chat-hd">
         <div className="chat-hd-left">
-          <div style={{ display: 'flex', gap: 2, background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 5, padding: 2 }}>
-            {tabBtn('chat', 'Chat')}
-            {tabBtn('sessions', 'Sessions')}
-          </div>
-          <div className="chat-title" style={{ marginTop: 4 }}>
-            {tab === 'sessions' ? (
+          {!embedded && (
+            <div style={{ display: 'flex', gap: 2, background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 5, padding: 2 }}>
+              {tabBtn('chat', 'Chat')}
+              {tabBtn('sessions', 'Sessions')}
+            </div>
+          )}
+          <div className="chat-title" style={{ marginTop: embedded ? 0 : 4 }}>
+            {embedded ? (
+              task ? (
+                <><span className="mono">{task.id}</span><span className="sep">·</span><span>{task.title}</span></>
+              ) : (
+                <span className="muted">Task chat</span>
+              )
+            ) : tab === 'sessions' ? (
               <span className="muted">Active Claude Code sessions</span>
             ) : task ? (
               <><span className="mono">{task.id}</span><span className="sep">·</span><span>{task.title}</span></>
@@ -266,9 +275,11 @@ export default function ChatPanel() {
         </div>
 
         <div className="chat-hd-right">
-          <button className="btn" onClick={handleNew}>
-            <span className="btn-glyph">◆</span>New
-          </button>
+          {!embedded && (
+            <button className="btn" onClick={handleNew}>
+              <span className="btn-glyph">◆</span>New
+            </button>
+          )}
           {sessionId && (
             <div className="session-id">
               <span className="muted">session</span><span className="mono">{sessionId.slice(0, 8)}…</span>
@@ -288,7 +299,7 @@ export default function ChatPanel() {
       </header>
 
       {/* ── Sessions tab ── */}
-      {tab === 'sessions' && (
+      {!embedded && tab === 'sessions' && (
         <div className="chat-log">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
             <select
@@ -361,7 +372,7 @@ export default function ChatPanel() {
       )}
 
       {/* ── Chat tab ── */}
-      {tab === 'chat' && (
+      {(embedded || tab === 'chat') && (
         <>
           <div className="chat-log" ref={logRef}>
             {loadingHistory ? (

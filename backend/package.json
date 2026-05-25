@@ -1,5 +1,5 @@
 {
-  "name": "agent-control-panel-backend",
+  "name": "coding-harness-backend",
   "version": "1.0.0",
   "private": true,
   "main": "dist/index.js",

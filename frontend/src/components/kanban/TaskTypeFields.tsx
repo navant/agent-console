@@ -51,6 +51,9 @@ export default function TaskTypeFields({
 
   const selectedType = taskTypeId ? taskTypes.find(t => t.id === taskTypeId) : null;
   const locked = !!selectedType;
+  const agentLocked = locked && !!selectedType?.agent;
+  const workflowLocked = locked && !!selectedType?.workflow;
+  const skillsLocked = locked && (selectedType?.skills?.length ?? 0) > 0;
   const showSkillSearch = skills.length >= 4;
 
   const filteredSkills = skillSearch.trim()
@@ -62,7 +65,7 @@ export default function TaskTypeFields({
     : skills;
 
   const toggleSkill = (id: string) => {
-    if (locked || disabled) return;
+    if (skillsLocked || disabled) return;
     onSkillIdsChange(skillIds.includes(id) ? skillIds.filter(x => x !== id) : [...skillIds, id]);
   };
 
@@ -115,7 +118,7 @@ export default function TaskTypeFields({
             className="text"
             value={workflowId}
             onChange={e => onWorkflowChange(e.target.value)}
-            disabled={disabled || locked}
+            disabled={disabled || workflowLocked}
           >
             {workflows.length === 0 && <option value="">No workflows</option>}
             {workflows.map(w => (
@@ -133,13 +136,13 @@ export default function TaskTypeFields({
       <div className="field">
         <label className="field-lbl">
           <span>Agent</span>
-          <span className="field-hint">{locked ? 'from task type' : 'optional persona'}</span>
+          <span className="field-hint">{agentLocked ? 'from task type' : 'optional persona'}</span>
         </label>
         <select
           className="text"
           value={agentId}
           onChange={e => onAgentChange(e.target.value)}
-          disabled={disabled || locked}
+          disabled={disabled || agentLocked}
         >
           <option value="">Default (claude)</option>
           {agents.map(a => (
@@ -155,14 +158,14 @@ export default function TaskTypeFields({
         <label className="field-lbl">
           <span>Skills</span>
           <span className="field-hint">
-            {locked ? 'from task type' : skillIds.length > 0 ? `${skillIds.length} selected` : 'optional'}
+            {skillsLocked ? 'from task type' : skillIds.length > 0 ? `${skillIds.length} selected` : 'optional'}
           </span>
         </label>
         {skills.length === 0 ? (
           <p className="field-hint">No skills found</p>
         ) : (
           <>
-            {showSkillSearch && !locked && (
+            {showSkillSearch && !skillsLocked && (
               <div className="search skill-picker-search">
                 <span className="search-glyph">⌕</span>
                 <input
@@ -174,7 +177,7 @@ export default function TaskTypeFields({
                 />
               </div>
             )}
-            <div className={'chips skill-picker' + (locked ? ' is-locked' : '')}>
+            <div className={'chips skill-picker' + (skillsLocked ? ' is-locked' : '')}>
               {filteredSkills.map(skill => {
                 const on = skillIds.includes(skill.id);
                 return (
@@ -183,7 +186,7 @@ export default function TaskTypeFields({
                     type="button"
                     className={'chip' + (on ? ' is-on' : '')}
                     onClick={() => toggleSkill(skill.id)}
-                    disabled={disabled || locked}
+                    disabled={disabled || skillsLocked}
                   >
                     <span className="chip-tick">{on ? '✓' : '○'}</span>
                     <span>{skill.name}</span>

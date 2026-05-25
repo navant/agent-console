@@ -1,17 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
-import { implementPrd } from '../../api/client';
+import { implementPrd, runTask } from '../../api/client';
 import TaskTypeFields, { applyTaskTypeSelection } from '../kanban/TaskTypeFields';
+
+import { TaskTypeDef } from '../../types';
 
 function titleFromPrd(content: string, fallback: string): string {
   const match = content.match(/^#\s+(.+)$/m);
   return match?.[1]?.trim() || fallback.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
 }
 
-function defaultImplementTypeId(types: { id: string; default?: boolean }[]): string {
-  return types.find(t => t.id === 'implement')?.id
+/** PRD → task uses the Planning type from Settings (id `planning`, or name match). */
+function defaultPlanningTypeId(types: TaskTypeDef[]): string {
+  return types.find(t => t.id === 'planning')?.id
+    ?? types.find(t => t.name.toLowerCase() === 'planning')?.id
     ?? types.find(t => t.default)?.id
+    ?? types[0]?.id
     ?? '';
+}
+
+function planningTaskTitle(prdTitle: string, taskType: TaskTypeDef | undefined): string {
+  const isPlanning =
+    taskType?.id === 'planning' || taskType?.name.toLowerCase() === 'planning';
+  if (!isPlanning) return prdTitle;
+  if (/^plan:/i.test(prdTitle.trim())) return prdTitle;
+  return `Plan: ${prdTitle}`;
 }
 
 interface ImplementPrdModalProps {
@@ -32,7 +45,8 @@ export default function ImplementPrdModal({
   const workflows = useStore(s => s.workflows);
   const taskTypes = useStore(s => s.taskTypes);
   const addTask = useStore(s => s.addTask);
-  const openWorkspaceTab = useStore(s => s.openWorkspaceTab);
+  const setRunning = useStore(s => s.setRunning);
+  const openTaskTab = useStore(s => s.openTaskTab);
 
   const [title, setTitle] = useState('');
   const [taskTypeId, setTaskTypeId] = useState('');
@@ -45,8 +59,9 @@ export default function ImplementPrdModal({
   useEffect(() => {
     if (!open) return;
     const name = prdPath.split('/').pop() ?? prdPath;
-    setTitle(titleFromPrd(prdContent, name));
-    const typeId = defaultImplementTypeId(taskTypes);
+    const typeId = defaultPlanningTypeId(taskTypes);
+    const typeDef = taskTypes.find(t => t.id === typeId);
+    setTitle(planningTaskTitle(titleFromPrd(prdContent, name), typeDef));
     setTaskTypeId(typeId);
     if (typeId) {
       const applied = applyTaskTypeSelection(typeId, taskTypes);
@@ -90,7 +105,9 @@ export default function ImplementPrdModal({
       addTask(task);
       onClose();
       onCreated?.(task.id);
-      openWorkspaceTab('tasks');
+      openTaskTab(task.id);
+      runTask(task.id);
+      setRunning(true);
     } catch (err) {
       console.error('Failed to implement PRD as task:', err);
     } finally {
@@ -103,8 +120,8 @@ export default function ImplementPrdModal({
       <div className="modal" style={{ width: 560 }} onMouseDown={e => e.stopPropagation()}>
         <header className="modal-hd">
           <div>
-            <div className="modal-eyebrow">Implement PRD</div>
-            <h2 className="modal-title">Create task from PRD</h2>
+            <div className="modal-eyebrow">Plan PRD</div>
+            <h2 className="modal-title">Create planning task from PRD</h2>
             <p className="field-hint mono">{prdPath}</p>
           </div>
           <button className="modal-x" onClick={onClose}>✕</button>
@@ -140,7 +157,7 @@ export default function ImplementPrdModal({
           <div className="modal-ft-actions">
             <button className="btn" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" onClick={submit} disabled={!valid || submitting}>
-              {submitting ? 'Creating…' : 'Create task'}
+              {submitting ? 'Creating…' : 'Create & run task'}
             </button>
           </div>
         </footer>

@@ -8,9 +8,10 @@ interface EditTaskModalProps {
   open: boolean;
   taskId: string | null;
   onClose: () => void;
+  onDelete?: () => void;
 }
 
-export default function EditTaskModal({ open, taskId, onClose }: EditTaskModalProps) {
+export default function EditTaskModal({ open, taskId, onClose, onDelete }: EditTaskModalProps) {
   const tasks = useStore(s => s.tasks);
   const updateTask = useStore(s => s.updateTask);
 
@@ -153,7 +154,12 @@ export default function EditTaskModal({ open, taskId, onClose }: EditTaskModalPr
 
         <footer className="modal-ft">
           <div className="modal-ft-meta muted">
-            {task.status} · {task.type}{task.taskType ? ` · ${task.taskType}` : ''}
+            {onDelete && (
+              <button type="button" className="btn btn-sm danger" onClick={onDelete}>
+                Delete task
+              </button>
+            )}
+            <span>{task.status} · {task.type}{task.taskType ? ` · ${task.taskType}` : ''}</span>
           </div>
           <div className="modal-ft-actions">
             <button className="btn" onClick={onClose}>Cancel</button>

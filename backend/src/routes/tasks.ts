@@ -79,6 +79,7 @@ router.post('/', (req: Request, res: Response) => {
       skills?: string[];
       description?: string;
       prd?: string;
+      goal?: string;
       taskType?: string;
     };
     if (!body.title) return res.status(400).json({ error: 'title is required' });
@@ -99,6 +100,7 @@ router.post('/', (req: Request, res: Response) => {
         skills: resolved.skills,
         description: body.description,
         prd: body.prd,
+        goal: body.goal,
         taskType: resolved.taskType,
       },
       wsPath

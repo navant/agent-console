@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { getConfig, saveConfig, setActiveWorkspace, getPathSettings, savePathSettings } from '../services/fileStore';
+import { getConfig, saveConfig, setActiveWorkspace, getPathSettings, savePathSettings, getActiveWorkspace } from '../services/fileStore';
+import { setupHarness } from '../services/setupStore';
 
 const router = Router();
 
@@ -17,6 +18,20 @@ router.put('/paths', (req: Request, res: Response) => {
     const body = req.body as Record<string, string>;
     const pathSettings = savePathSettings(body);
     res.json({ pathSettings });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.post('/setup', (_req: Request, res: Response) => {
+  try {
+    const ws = getActiveWorkspace();
+    if (!ws) {
+      return res.status(400).json({ error: 'No active workspace. Add a workspace first.' });
+    }
+
+    const result = setupHarness(ws.path);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

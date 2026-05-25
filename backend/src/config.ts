@@ -2,7 +2,7 @@ import os from 'os';
 import path from 'path';
 import { PathSettings } from './types';
 
-export const DATA_DIR = path.join(os.homedir(), '.agent-control-panel');
+export const DATA_DIR = path.join(os.homedir(), '.coding-harness');
 export const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 
 export const CLAUDE_DIR = path.join(os.homedir(), '.claude');
@@ -13,6 +13,7 @@ export const PATHS = {
 
 export const DEFAULT_PATH_SETTINGS: PathSettings = {
   prd: '.claude/prd',
+  goals: '.claude/goals',
   skills: '.claude/skills',
   agents: '.claude/agents',
   tasks: '.claude/tasks',
@@ -20,20 +21,24 @@ export const DEFAULT_PATH_SETTINGS: PathSettings = {
   workflows: '.claude/workflows',
   globalAgents: '~/.claude/agents',
   globalSkills: '~/.claude/skills',
+  globalWorkflows: '~/.claude/workflows',
 };
 
 export function mergePathSettings(partial?: Partial<PathSettings>): PathSettings {
   return { ...DEFAULT_PATH_SETTINGS, ...partial };
 }
 
-export function resolveGlobalPath(settings: PathSettings, key: 'globalAgents' | 'globalSkills'): string {
+export function resolveGlobalPath(
+  settings: PathSettings,
+  key: 'globalAgents' | 'globalSkills' | 'globalWorkflows'
+): string {
   return expandHome(settings[key]);
 }
 
 export function resolveWorkspacePath(
   workspacePath: string,
   settings: PathSettings,
-  key: Exclude<keyof PathSettings, 'globalAgents' | 'globalSkills'>
+  key: Exclude<keyof PathSettings, 'globalAgents' | 'globalSkills' | 'globalWorkflows'>
 ): string {
   const rel = settings[key].replace(/^\.\//, '');
   return path.join(expandHome(workspacePath), rel);
@@ -44,6 +49,13 @@ export function expandHome(p: string): string {
   if (p === '~') return os.homedir();
   return p;
 }
+
+/** Repo root (parent of `backend/`). Works from `dist/` at runtime. */
+export const REPO_ROOT = path.join(__dirname, '../..');
+export const PRD_TEMPLATE_PATH = path.join(REPO_ROOT, 'templates', 'prd_template.md');
+export const GOALS_TEMPLATE_PATH = path.join(REPO_ROOT, 'templates', 'goals_template.md');
+export const AGENTS_TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'agents');
+export const SKILLS_TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'skills');
 
 // Legacy helpers — prefer resolveWorkspacePath with getPathSettings() from fileStore
 export function workspaceClaudeDir(workspacePath: string): string {

@@ -18,12 +18,14 @@ import {
 
 const VIEW_LABELS: Record<WorkspaceViewId, string> = {
   tasks: 'Tasks',
+  task: 'Task',
   chat: 'Chat',
   memory: 'Memory',
   agents: 'Agents',
   skills: 'Skills',
   workflows: 'Workflows',
-  prd: 'PRD',
+  prd: 'Planning',
+  goals: 'Goals',
   settings: 'Settings',
 };
 
@@ -31,6 +33,14 @@ const DEFAULT_TABS: WorkspaceTab[] = [
   { id: 'tab-tasks', view: 'tasks', label: 'Tasks', closable: false },
   { id: 'tab-chat', view: 'chat', label: 'Chat', closable: true },
 ];
+
+function taskTabLabel(title: string): string {
+  return title.length > 32 ? `${title.slice(0, 30)}…` : title;
+}
+
+function taskTabId(taskId: string): string {
+  return `tab-task-${taskId}`;
+}
 import {
   getAgents,
   getWorkspaces,
@@ -75,13 +85,13 @@ interface Store {
   currentSessionId: string | null;
   wsConnected: boolean;
   panelMode: 'chat' | 'terminal';
-  showTaskDetail: boolean;
   workspaceSaving: boolean;
   workspaceTabs: WorkspaceTab[];
   activeTabId: string;
   pinnedDock: WorkspaceViewId | null;
   pathSettings: PathSettings | null;
   pendingPrdPath: string | null;
+  pendingGoalPath: string | null;
   autoQueue: boolean;
   taskTypes: TaskTypeDef[];
   chatSkillBootstrap: boolean;
@@ -129,16 +139,19 @@ interface Store {
   setCurrentSessionId: (id: string | null) => void;
   setWsConnected: (connected: boolean) => void;
   setPanelMode: (mode: 'chat' | 'terminal') => void;
-  setShowTaskDetail: (show: boolean) => void;
   openWorkspaceTab: (view: WorkspaceViewId) => void;
+  openTaskTab: (taskId: string) => void;
   openPrdFile: (path: string) => void;
   clearPendingPrdPath: () => void;
+  openGoalFile: (path: string) => void;
+  clearPendingGoalPath: () => void;
   closeWorkspaceTab: (tabId: string) => void;
   setActiveTabId: (tabId: string) => void;
   setPathSettings: (pathSettings: PathSettings) => void;
   setTaskTypes: (taskTypes: TaskTypeDef[]) => void;
   setAutomation: (autoQueue: boolean) => void;
   setChatSkillBootstrap: (bootstrap: boolean) => void;
+  bindTaskChatContext: (taskId: string) => Promise<void>;
   continueTaskInChat: (taskId: string) => Promise<void>;
   togglePinnedDock: (view: WorkspaceViewId) => void;
 }
@@ -178,13 +191,13 @@ export const useStore = create<Store>((set, get) => ({
   currentSessionId: null,
   wsConnected: false,
   panelMode: 'chat',
-  showTaskDetail: false,
   workspaceSaving: false,
   workspaceTabs: [...DEFAULT_TABS],
   activeTabId: 'tab-tasks',
   pinnedDock: null,
   pathSettings: null,
   pendingPrdPath: null,
+  pendingGoalPath: null,
   autoQueue: true,
   taskTypes: [],
   chatSkillBootstrap: false,
@@ -270,8 +283,30 @@ export const useStore = create<Store>((set, get) => ({
   addTask: (task) => set(s => ({ tasks: [task, ...s.tasks] })),
   updateTask: (task) => set(s => ({
     tasks: s.tasks.map(t => t.id === task.id ? task : t),
+    workspaceTabs: s.workspaceTabs.map(tab =>
+      tab.taskId === task.id ? { ...tab, label: taskTabLabel(task.title) } : tab
+    ),
   })),
-  removeTask: (id) => set(s => ({ tasks: s.tasks.filter(t => t.id !== id) })),
+  removeTask: (id) => set(s => {
+    const { [id]: _p, ...taskProgress } = s.taskProgress;
+    const { [id]: _c, ...taskComments } = s.taskComments;
+    const { [id]: _plan, ...taskPlans } = s.taskPlans;
+    const tabId = taskTabId(id);
+    const workspaceTabs = s.workspaceTabs.filter(t => t.taskId !== id);
+    const wasSelected = s.selectedTaskId === id;
+    const closedActive = s.activeTabId === tabId;
+    return {
+      tasks: s.tasks.filter(t => t.id !== id),
+      taskProgress,
+      taskComments,
+      taskPlans,
+      workspaceTabs,
+      selectedTaskId: wasSelected ? null : s.selectedTaskId,
+      activeTabId: closedActive
+        ? (workspaceTabs.find(t => t.id === 'tab-tasks')?.id ?? workspaceTabs[0]?.id ?? 'tab-tasks')
+        : s.activeTabId,
+    };
+  }),
   setSkills: (skills) => set({ skills }),
   setWorkflows: (workflows) => set({ workflows }),
   setMemory: (memory) => set({ memory }),
@@ -321,9 +356,9 @@ export const useStore = create<Store>((set, get) => ({
   setCurrentSessionId: (currentSessionId) => set({ currentSessionId }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
   setPanelMode: (panelMode) => set({ panelMode }),
-  setShowTaskDetail: (showTaskDetail) => set({ showTaskDetail }),
 
   openWorkspaceTab: (view) => {
+    if (view === 'task') return;
     const { workspaceTabs } = get();
     const existing = workspaceTabs.find(t => t.view === view);
     if (existing) {
@@ -339,12 +374,47 @@ export const useStore = create<Store>((set, get) => ({
     set({ workspaceTabs: [...workspaceTabs, tab], activeTabId: tab.id });
   },
 
+  openTaskTab: (taskId) => {
+    const { workspaceTabs, tasks } = get();
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const tabId = taskTabId(taskId);
+    const existing = workspaceTabs.find(t => t.id === tabId);
+    if (existing) {
+      set({ activeTabId: existing.id, selectedTaskId: taskId });
+      void get().bindTaskChatContext(taskId);
+      return;
+    }
+
+    const tab: WorkspaceTab = {
+      id: tabId,
+      view: 'task',
+      taskId,
+      label: taskTabLabel(task.title),
+      closable: true,
+    };
+    set({
+      workspaceTabs: [...workspaceTabs, tab],
+      activeTabId: tab.id,
+      selectedTaskId: taskId,
+    });
+    void get().bindTaskChatContext(taskId);
+  },
+
   openPrdFile: (path) => {
     set({ pendingPrdPath: path });
     get().openWorkspaceTab('prd');
   },
 
   clearPendingPrdPath: () => set({ pendingPrdPath: null }),
+
+  openGoalFile: (path) => {
+    set({ pendingGoalPath: path });
+    get().openWorkspaceTab('goals');
+  },
+
+  clearPendingGoalPath: () => set({ pendingGoalPath: null }),
 
   closeWorkspaceTab: (tabId) => {
     const { workspaceTabs, activeTabId } = get();
@@ -353,12 +423,24 @@ export const useStore = create<Store>((set, get) => ({
     const next = workspaceTabs.filter(t => t.id !== tabId);
     let nextActive = activeTabId;
     if (activeTabId === tabId) {
-      nextActive = next[next.length - 1]?.id ?? 'tab-tasks';
+      nextActive = next.find(t => t.id === 'tab-tasks')?.id ?? next[next.length - 1]?.id ?? 'tab-tasks';
     }
-    set({ workspaceTabs: next, activeTabId: nextActive });
+    set({
+      workspaceTabs: next,
+      activeTabId: nextActive,
+      ...(tab.taskId && tab.taskId === get().selectedTaskId ? { selectedTaskId: null } : {}),
+    });
   },
 
-  setActiveTabId: (activeTabId) => set({ activeTabId }),
+  setActiveTabId: (activeTabId) => {
+    const tab = get().workspaceTabs.find(t => t.id === activeTabId);
+    if (tab?.view === 'task' && tab.taskId) {
+      set({ activeTabId, selectedTaskId: tab.taskId });
+      void get().bindTaskChatContext(tab.taskId);
+      return;
+    }
+    set({ activeTabId });
+  },
 
   setPathSettings: (pathSettings) => set({ pathSettings }),
 
@@ -368,19 +450,16 @@ export const useStore = create<Store>((set, get) => ({
 
   setChatSkillBootstrap: (bootstrap) => set({ chatSkillBootstrap: bootstrap }),
 
-  continueTaskInChat: async (taskId) => {
+  bindTaskChatContext: async (taskId) => {
     const task = get().tasks.find(t => t.id === taskId);
     if (!task) return;
 
     set({
-      selectedTaskId: taskId,
       chatAgent: task.agent || '',
-      showTaskDetail: false,
       currentSessionId: task.session_id ?? null,
       chatSkillBootstrap: (task.skills?.length ?? 0) > 0,
     });
     get().clearMessages();
-    get().openWorkspaceTab('chat');
 
     if (task.session_id) {
       try {
@@ -391,10 +470,14 @@ export const useStore = create<Store>((set, get) => ({
       } catch {
         get().addMessage({
           type: 'system',
-          text: `Could not load session ${task.session_id.slice(0, 8)}… — start a new message to continue.`,
+          text: `Could not load session ${task.session_id.slice(0, 8)}… — send a message to continue.`,
         });
       }
     }
+  },
+
+  continueTaskInChat: async (taskId) => {
+    get().openTaskTab(taskId);
   },
 
   togglePinnedDock: (view) => {

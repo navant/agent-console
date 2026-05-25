@@ -7,6 +7,7 @@ export interface AppConfig {
 
 export interface PathSettings {
   prd: string;
+  goals: string;
   skills: string;
   agents: string;
   tasks: string;
@@ -14,9 +15,17 @@ export interface PathSettings {
   workflows: string;
   globalAgents: string;
   globalSkills: string;
+  globalWorkflows: string;
 }
 
 export interface PrdFile {
+  id: string;
+  name: string;
+  path: string;
+  updatedAt?: string;
+}
+
+export interface GoalFile {
   id: string;
   name: string;
   path: string;
@@ -70,6 +79,7 @@ export interface TaskConfig {
   skills: string[];
   taskType?: string;
   prd?: string;
+  goal?: string;
   session_id?: string;
   createdAt: string;
   updatedAt: string;
@@ -89,6 +99,7 @@ export interface WorkflowConfig {
   max_iterations?: number;
   commit_on_story?: boolean;
   template: string;
+  source: 'global' | 'workspace';
 }
 
 export interface UserStory {

@@ -37,15 +37,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const getConfig = () => request<AppConfig>('/config');
 export const updatePathSettings = (paths: Partial<PathSettings>) =>
   request<PathSettings>('/config/paths', { method: 'PUT', body: JSON.stringify(paths) });
-export interface SetupHarnessResult {
+export interface SetupConsoleResult {
   workspacePath: string;
   agentsDir: string;
   skillsDir: string;
   agents: { copied: string[]; skipped: string[] };
   skills: { copied: string[]; skipped: string[] };
 }
-export const setupHarness = () =>
-  request<SetupHarnessResult>('/config/setup', { method: 'POST' });
+export const setupConsole = () =>
+  request<SetupConsoleResult>('/config/setup', { method: 'POST' });
 export const switchWorkspace = (workspaceId: string) =>
   request<{ activeWorkspace: string; workspace: WorkspaceConfig }>('/config/workspace', {
     method: 'POST',

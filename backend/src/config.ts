@@ -2,7 +2,7 @@ import os from 'os';
 import path from 'path';
 import { PathSettings } from './types';
 
-export const DATA_DIR = path.join(os.homedir(), '.coding-harness');
+export const DATA_DIR = path.join(os.homedir(), '.agent-console');
 export const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 
 export const CLAUDE_DIR = path.join(os.homedir(), '.claude');

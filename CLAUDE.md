@@ -1,32 +1,26 @@
-# Claude Code — Coding Harness
+# Claude Code — Agent Console
 
 @AGENTS.md
 
 ## Claude-specific
 
-- Use the **Skill** tool for task-configured skills (`buildSkillInvocationPrompt` in `backend/src/services/fileStore.ts`).
-- **Goals tasks** run via PTY slash: `/goal goals/<file>.md` (`goalsStore.ts` + `ptyRunner.ts`).
-- **Planning tasks** inject PRD markdown at run time (`getPrdContent` in `taskRunner.ts`).
+- **Skill tool** for task skills (`buildSkillInvocationPrompt` in `fileStore.ts`).
+- **Goals tasks:** PTY slash `/goal goals/<file>.md` (`goalsStore.ts`, `ptyRunner.ts`).
+- **Planning tasks:** PRD markdown in prompt at run time (`taskRunner.ts` + `getPrdContent`).
 
-## Quick commands
+## Commands
 
 ```bash
 npm run dev
-cd backend && npm run dev
-cd frontend && npm run dev
 ```
 
-## Where to look
+## Key files
 
-| Topic | File(s) |
-|-------|---------|
-| Paths & defaults | `backend/src/config.ts` |
-| Task execution | `backend/src/services/taskRunner.ts`, `ralphRunner.ts` |
-| Setup templates | `backend/src/services/setupStore.ts`, `POST /api/config/setup` |
-| Roadmap | `plan.md`, `README.md` |
+| Topic | Path |
+|-------|------|
+| Config / paths | `backend/src/config.ts` |
+| Task runs | `backend/src/services/taskRunner.ts` |
+| Template setup | `backend/src/services/setupStore.ts` |
+| UI state | `frontend/src/store/useStore.ts` |
 
-## Constraints
-
-- No database; no auth.
-- `claude` on PATH for runs.
-- Path-scoped rules: `.claude/rules/`.
+Path-scoped rules: `.claude/rules/`.

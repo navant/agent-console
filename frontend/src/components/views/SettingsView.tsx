@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
-import { getConfig, updatePathSettings, setupHarness as runSetupHarness } from '../../api/client';
+import { getConfig, updatePathSettings, setupConsole as runSetupConsole } from '../../api/client';
 import { PathSettings } from '../../types';
 import { DEFAULT_PATH_SETTINGS } from '../../constants/paths';
 import TaskTypeConfigPanel from '../settings/TaskTypeConfigPanel';
@@ -74,7 +74,7 @@ export default function SettingsView() {
     setSetupError(null);
     setSetupMessage(null);
     try {
-      const result = await runSetupHarness();
+      const result = await runSetupConsole();
       await loadWorkspaceData();
       const copied = result.agents.copied.length + result.skills.copied.length;
       const skipped = result.agents.skipped.length + result.skills.skipped.length;
@@ -101,7 +101,7 @@ export default function SettingsView() {
 
       <section className="settings-setup-card">
         <div>
-          <h3 className="settings-setup-title">Setup Coding Harness</h3>
+          <h3 className="settings-setup-title">Setup workspace</h3>
           <p className="muted settings-setup-desc">
             Copy bundled agents and skills from app templates into
             {activeWorkspace ? (
@@ -118,7 +118,7 @@ export default function SettingsView() {
           onClick={() => void runSetup()}
           disabled={setupRunning || !activeWorkspaceId}
         >
-          {setupRunning ? 'Setting up…' : 'Setup Coding Harness'}
+          {setupRunning ? 'Setting up…' : 'Setup workspace'}
         </button>
         {setupMessage && <p className="settings-setup-msg">{setupMessage}</p>}
         {setupError && <p className="settings-setup-error">{setupError}</p>}

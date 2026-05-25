@@ -13,7 +13,7 @@ export interface SetupCopyResult {
   skipped: string[];
 }
 
-export interface SetupHarnessResult {
+export interface SetupConsoleResult {
   workspacePath: string;
   agentsDir: string;
   skillsDir: string;
@@ -94,7 +94,7 @@ function copySkillTemplates(destDir: string): SetupCopyResult {
   return result;
 }
 
-export function setupHarness(workspacePath: string): SetupHarnessResult {
+export function setupConsole(workspacePath: string): SetupConsoleResult {
   const resolvedWs = expandHome(workspacePath);
   const settings = getPathSettings();
   const agentsDir = resolveWorkspacePath(resolvedWs, settings, 'agents');

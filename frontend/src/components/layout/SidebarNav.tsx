@@ -36,7 +36,7 @@ export default function SidebarNav() {
       <div className="brand">
         <div className="brand-mark">◆</div>
         <div className="brand-text">
-          <div className="brand-title">Coding Harness</div>
+          <div className="brand-title">Agent Console</div>
           <div className="brand-sub">
             {active?.name ?? 'no workspace'} · {wsConnected ? 'connected' : '…'}
           </div>

@@ -1,17 +1,17 @@
-# Coding Harness — instructions for coding agents
+# Agent Console — instructions for coding agents
 
-Local-first control panel for **Claude Code CLI**. Manages workspaces, kanban tasks, agents, skills, workflows, PRDs, and goals — all persisted as files on disk (no database, no auth).
+Local browser UI for **workspace visibility and control** when running coding agents (Claude Code CLI). Kanban tasks, agents, skills, workflows, PRD/goals — file-based only (no database, no auth).
 
 ## Repository layout
 
 ```
-coding-harness/
+agent-console/
 ├── backend/          Express + WebSocket API (port 3001)
-├── frontend/         React + Vite + Zustand (port 3000, proxies /api and /ws)
-├── templates/        Bundled agents, skills, PRD/goals templates (copied via Setup)
-├── .claude/          Example workflows + path rules (not user workspace data)
-├── plan.md           Product / architecture plan
-└── CLAUDE.md         Claude Code–specific overrides (imports this file)
+├── frontend/         React + Vite + Zustand (port 3000)
+├── templates/        Bundled agents/skills (copied via Settings → Setup workspace)
+├── .claude/          Example workflows + path rules (not user runtime data)
+├── plan.md           Product plan
+└── CLAUDE.md         Claude Code overrides (@imports this file)
 ```
 
 ## Commands
@@ -19,39 +19,26 @@ coding-harness/
 ```bash
 npm run install:all
 npm run dev
-npm run dev:backend
-npm run dev:frontend
 ```
 
-**Prerequisites:** Node 18+, `claude` CLI on PATH and authenticated.
+**Prerequisites:** Node 18+, `claude` on PATH and authenticated.
 
-## Architecture (short)
+## Architecture
 
 | Layer | Role |
 |-------|------|
-| **Frontend** | Workspace tabs, kanban, task detail tabs, Goals/Planning views, settings |
-| **Backend** | REST + WS; spawns `claude` / PTY slash commands; reads/writes workspace `.claude/` |
-| **Data** | `~/.coding-harness/config.json`; per-workspace `.claude/*` |
+| Frontend | Workspace tabs, kanban, task tabs, Planning/Goals, settings |
+| Backend | REST + WS; `claude` / slash commands; workspace `.claude/` I/O |
+| Data | `~/.agent-console/config.json` + per-workspace `.claude/*` |
 
 ## Coding standards
 
-- **TypeScript** strict in backend and frontend; match existing patterns.
-- **Minimal diffs** — no unrelated refactors.
-- **No database** — YAML/JSON/markdown on disk only.
-- **No auth** — localhost only.
-- **Paths** — use `getPathSettings()`, `resolveWorkspacePath()`, `expandHome()` from `backend/src/config.ts`.
-- **Skills at runtime** — **Skill tool** via `buildSkillInvocationPrompt`, not pasted SKILL.md.
-
-## Data locations
-
-| What | Where |
-|------|--------|
-| App config | `~/.coding-harness/config.json` |
-| Workspace data | `<workspace>/.claude/` (configurable in Settings) |
-| Global agents/skills | `~/.claude/agents`, `~/.claude/skills` (defaults) |
-| Bundled templates | `templates/agents`, `templates/skills` |
+- TypeScript strict; minimal diffs; match existing style.
+- No database; no auth; localhost only.
+- Paths via `getPathSettings()`, `resolveWorkspacePath()`, `expandHome()` in `backend/src/config.ts`.
+- Skills at runtime: **Skill tool** (`buildSkillInvocationPrompt`), not pasted SKILL.md.
 
 ## Do not
 
-- Commit secrets, local `.claude/tasks/`, or machine-specific `settings.json`.
-- Overwrite user workspace files during setup (skip-if-exists only).
+- Commit secrets or local `.claude/tasks/`, `settings.json`.
+- Overwrite workspace files on setup (skip-if-exists only).

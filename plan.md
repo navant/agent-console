@@ -1,4 +1,4 @@
-# Coding Harness — Product Plan
+# Agent Console — Product Plan
 
 ## Core Concepts
 
@@ -24,7 +24,7 @@
     ralph/SKILL.md
     prd/SKILL.md
 
-~/.coding-harness/
+~/.agent-console/
   config.json           { activeWorkspace, registeredWorkspaces[] }
 
 <workspace>/
@@ -343,7 +343,7 @@ Post-run, memories are written back via claude-mem hooks.
 
 ### Path settings
 
-Stored in `~/.coding-harness/config.json` under `pathSettings`. Defaults (workspace-relative unless noted):
+Stored in `~/.agent-console/config.json` under `pathSettings`. Defaults (workspace-relative unless noted):
 
 | Key | Default |
 |-----|---------|

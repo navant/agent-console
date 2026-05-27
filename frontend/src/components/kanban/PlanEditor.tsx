@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../store/useStore';
-import { getTaskPlan, saveTaskPlan, generateTaskPlan } from '../../api/client';
+import { getTaskPlan, saveTaskPlan, generateTaskPlan, updateTask as apiUpdateTask } from '../../api/client';
+import { isRalphLoopWorkflow } from '../../utils/workflowOptions';
 import { PlanConfig, UserStory } from '../../types';
 
 interface PlanEditorProps {
@@ -80,7 +81,9 @@ export default function PlanEditor({ open, taskId, onClose }: PlanEditorProps) {
       const generated = await generateTaskPlan(taskId);
       setPlan(generated);
     } catch (err) {
-      console.error(err);
+      window.alert(
+        `Plan generation failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     } finally {
       setGenerating(false);
     }
@@ -91,8 +94,11 @@ export default function PlanEditor({ open, taskId, onClose }: PlanEditorProps) {
     try {
       const saved = await saveTaskPlan(taskId, plan);
       setTaskPlan(taskId, saved);
-      if (task.status === 'todo' && saved.userStories.length > 0) {
-        updateTask({ ...task, status: 'planned' });
+      const needsPlan =
+        isRalphLoopWorkflow(task.workflow) || task.type === 'project';
+      if (needsPlan && task.status === 'todo' && saved.userStories.length > 0) {
+        const updated = await apiUpdateTask(taskId, { status: 'planned' });
+        updateTask(updated);
       }
       onClose();
     } catch (err) {
@@ -111,8 +117,8 @@ export default function PlanEditor({ open, taskId, onClose }: PlanEditorProps) {
             <h2 className="modal-title">User stories</h2>
           </div>
           <div className="modal-hd-actions">
-            <button className="btn" onClick={handleGenerate} disabled={generating}>
-              {generating ? 'Generating…' : 'Generate with AI'}
+            <button className="btn" onClick={handleGenerate} disabled={generating} title="Headless Claude — does not use prd/ralph skills">
+              {generating ? 'Generating…' : 'Quick generate (no skills)'}
             </button>
             <button className="modal-x" onClick={onClose}>✕</button>
           </div>

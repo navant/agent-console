@@ -19,6 +19,11 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT INT TERM
 
+# Skip when Agent Console started a headless run in this workspace (SessionEnd would recurse).
+if [[ -n "${AGENT_CONSOLE_HEADLESS:-}" ]]; then
+  exit 0
+fi
+
 if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi

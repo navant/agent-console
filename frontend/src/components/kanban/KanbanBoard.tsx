@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import TaskCard from './TaskCard';
 import EditTaskModal from './EditTaskModal';
-import { wsManager, updateTask, deleteTask, startAutoQueue, stopAutoQueue, runTask } from '../../api/client';
+import { wsManager, updateTask, deleteTask, startAutoQueue, stopAutoQueue, runTask, getTaskPlan } from '../../api/client';
+import { isRalphLoopWorkflow } from '../../utils/workflowOptions';
 import { TaskConfig } from '../../types';
 import {
   COLUMNS,
@@ -28,8 +29,8 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
   const setSearchQuery = useStore(s => s.setSearchQuery);
   const storeUpdateTask = useStore(s => s.updateTask);
   const removeTask = useStore(s => s.removeTask);
-  const setRunning = useStore(s => s.setRunning);
-  const running = useStore(s => s.running);
+  const setTaskRunning = useStore(s => s.setTaskRunning);
+  const taskRunning = useStore(s => s.taskRunning);
   const clearMessages = useStore(s => s.clearMessages);
   const activeWorkspaceId = useStore(s => s.activeWorkspaceId);
   const autoQueue = useStore(s => s.autoQueue);
@@ -71,7 +72,7 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
 
     if (task.status === 'running') {
       wsManager.send({ type: 'stop' });
-      setRunning(false);
+      setTaskRunning(false);
     }
 
     const updated: TaskConfig = {
@@ -107,9 +108,9 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
       return;
     }
 
-    if (task.status === 'running' || running) {
+    if (task.status === 'running' || taskRunning) {
       wsManager.send({ type: 'stop' });
-      setRunning(false);
+      setTaskRunning(false);
     }
 
     try {
@@ -121,7 +122,7 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
     }
   };
 
-  const handleAction = async (id: string) => {
+  const handleAction = async (id: string): Promise<void> => {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
 
@@ -130,12 +131,31 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
       const updated = { ...task, status: 'review' as const, updatedAt: new Date().toISOString() };
       storeUpdateTask(updated);
       try { await updateTask(id, { status: 'review' }); } catch { /* ignore */ }
-      setRunning(false);
+      setTaskRunning(false);
     } else if (task.status === 'todo' || task.status === 'review' || task.status === 'planned') {
+      if (!wsManager.isConnected) {
+        window.alert('Not connected to the server. Wait a moment and try again.');
+        return;
+      }
+      if (isRalphLoopWorkflow(task.workflow)) {
+        try {
+          const plan = await getTaskPlan(id);
+          if (!plan.userStories?.length) {
+            window.alert(
+              'Ralph loop needs prd.json stories before Run.\n\nOpen the task → Run PRD skill → Run ralph skill.'
+            );
+            openTaskTab(id);
+            return;
+          }
+        } catch {
+          window.alert('Could not load task plan.');
+          return;
+        }
+      }
       setSelectedTaskId(id);
       setChatAgent(task.agent);
       clearMessages();
-      setRunning(true);
+      setTaskRunning(true);
       wsManager.send({ type: 'run_task', taskId: id });
     } else if (task.status === 'awaiting_confirmation') {
       if (task.session_id) {
@@ -160,8 +180,15 @@ export default function KanbanBoard({ docked }: { docked?: boolean }) {
     e?.stopPropagation();
     const task = tasks.find(t => t.id === id);
     if (!task || task.status === 'running' || task.status === 'done' || task.status === 'archive') return;
+    if (isRalphLoopWorkflow(task.workflow)) {
+      window.alert(
+        'Ralph loop tasks do not support Nudge from the board.\n\nOpen the task → use Run PRD skill / Run ralph skill, or Submit & run PRD skill after Q&A.'
+      );
+      openTaskTab(id);
+      return;
+    }
     openTaskTab(id);
-    setRunning(true);
+    setTaskRunning(true);
     runTask(id, true);
   };
 

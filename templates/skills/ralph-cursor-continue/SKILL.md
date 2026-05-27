@@ -9,9 +9,20 @@ Continue executing PRD stories when Claude Code is unavailable.
 
 ---
 
+## Which Ralph are you continuing?
+
+| Setup | PRD file | Progress file |
+|-------|----------|---------------|
+| **Shell** (`ralph.sh`) | `scripts/ralph/prd.json` | `scripts/ralph/progress.txt` |
+| **Agent Console** task with `ralph-loop` | `.claude/tasks/<taskId>/prd.json` | `.claude/tasks/<taskId>/progress.txt` |
+
+Steps below use **`scripts/ralph/`** (shell mode). For in-app task loops, substitute the task paths from the table.
+
+---
+
 ## The Job
 
-1. Read `scripts/ralph/prd.json` for stories
+1. Read `scripts/ralph/prd.json` for stories (or the task plan path above)
 2. Read `scripts/ralph/progress.txt` for context (especially Codebase Patterns section)
 3. Read relevant `AGENTS.md` files for patterns
 4. Pick highest priority story where `passes: false`

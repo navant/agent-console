@@ -16,19 +16,23 @@ export default function TaskDetailHost({ taskId, tabId }: TaskDetailHostProps) {
   const closeWorkspaceTab = useStore(s => s.closeWorkspaceTab);
   const storeUpdateTask = useStore(s => s.updateTask);
   const removeTask = useStore(s => s.removeTask);
-  const setRunning = useStore(s => s.setRunning);
-  const running = useStore(s => s.running);
+  const setTaskRunning = useStore(s => s.setTaskRunning);
+  const taskRunning = useStore(s => s.taskRunning);
+  const setPlanEditorTaskId = useStore(s => s.setPlanEditorTaskId);
 
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
 
   const task = tasks.find(t => t.id === taskId);
   if (!task) {
     return (
-      <div className="workspace-empty-hint">
-        <p>Task not found.</p>
-        <button type="button" className="btn" onClick={() => closeWorkspaceTab(tabId)}>
-          Close tab
-        </button>
+      <div className="empty">
+        <div className="empty-inner">
+          <h2>Task not found</h2>
+          <p>This task may have been deleted from disk.</p>
+          <button type="button" className="btn btn-primary" onClick={() => closeWorkspaceTab(tabId)}>
+            Close tab
+          </button>
+        </div>
       </div>
     );
   }
@@ -38,7 +42,7 @@ export default function TaskDetailHost({ taskId, tabId }: TaskDetailHostProps) {
 
     if (task.status === 'running') {
       wsManager.send({ type: 'stop' });
-      setRunning(false);
+      setTaskRunning(false);
     }
 
     const updated: TaskConfig = {
@@ -65,9 +69,9 @@ export default function TaskDetailHost({ taskId, tabId }: TaskDetailHostProps) {
       return;
     }
 
-    if (target.status === 'running' || running) {
+    if (target.status === 'running' || taskRunning) {
       wsManager.send({ type: 'stop' });
-      setRunning(false);
+      setTaskRunning(false);
     }
 
     try {
@@ -88,6 +92,7 @@ export default function TaskDetailHost({ taskId, tabId }: TaskDetailHostProps) {
         onEdit={() => setEditTaskId(taskId)}
         onDelete={() => void handleDelete(taskId)}
         onMoveStatus={moveTaskToStatus}
+        onEditPlan={() => setPlanEditorTaskId(taskId)}
       />
       <EditTaskModal
         open={editTaskId !== null}

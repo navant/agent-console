@@ -41,12 +41,14 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
   const chatAgent           = useStore(s => s.chatAgent);
   const setChatAgent        = useStore(s => s.setChatAgent);
   const messages            = useStore(s => s.messages);
-  const running             = useStore(s => s.running);
+  const chatRunning         = useStore(s => s.chatRunning);
+  const taskRunning         = useStore(s => s.taskRunning);
   const currentSessionId    = useStore(s => s.currentSessionId);
   const setCurrentSessionId = useStore(s => s.setCurrentSessionId);
   const addMessage          = useStore(s => s.addMessage);
   const clearMessages       = useStore(s => s.clearMessages);
-  const setRunning          = useStore(s => s.setRunning);
+  const setChatRunning      = useStore(s => s.setChatRunning);
+  const setTaskRunning      = useStore(s => s.setTaskRunning);
   const chatSkillBootstrap  = useStore(s => s.chatSkillBootstrap);
   const setChatSkillBootstrap = useStore(s => s.setChatSkillBootstrap);
 
@@ -124,7 +126,11 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
   }, [clearMessages, addMessage]);
 
   const handleNew = () => {
-    if (running) { wsManager.send({ type: 'stop' }); setRunning(false); }
+    if (chatRunning || taskRunning) {
+      wsManager.send({ type: 'stop' });
+      setChatRunning(false);
+      setTaskRunning(false);
+    }
     clearMessages();
     setCurrentSessionId(null);
     setSelectedTaskId(null);
@@ -178,13 +184,18 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
   };
 
   const handleToggleRun = () => {
-    if (running) { wsManager.send({ type: 'stop' }); setRunning(false); }
-    else if (task) { wsManager.send({ type: 'run_task', taskId: task.id }); setRunning(true); }
+    if (taskRunning) {
+      wsManager.send({ type: 'stop' });
+      setTaskRunning(false);
+    } else if (task) {
+      wsManager.send({ type: 'run_task', taskId: task.id });
+      setTaskRunning(true);
+    }
   };
 
   const handleSend = () => {
     const text = draft.trim();
-    if (!text || running) return;
+    if (!text) return;
 
     // Client-side slash commands
     if (text === '/clear') {
@@ -196,7 +207,7 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
     setDraft('');
     setPickingAgent(false);
     addMessage({ type: 'user', text });
-    setRunning(true);
+    setChatRunning(true);
 
     // Slash commands go via interactive PTY runner; regular messages via stream-json
     if (text.startsWith('/')) {
@@ -239,17 +250,17 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
   );
 
   return (
-    <section className={'chat' + (embedded ? ' chat--embedded' : '')}>
+    <section className={'ac-chat' + (embedded ? ' ac-chat--embedded' : '')}>
       {/* ── Header ── */}
-      <header className="chat-hd">
-        <div className="chat-hd-left">
+      <header className="ac-chat-hd">
+        <div className="ac-chat-hd-left">
           {!embedded && (
             <div style={{ display: 'flex', gap: 2, background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 5, padding: 2 }}>
               {tabBtn('chat', 'Chat')}
               {tabBtn('sessions', 'Sessions')}
             </div>
           )}
-          <div className="chat-title" style={{ marginTop: embedded ? 0 : 4 }}>
+          <div className="ac-chat-title" style={{ marginTop: embedded ? 0 : 4 }}>
             {embedded ? (
               task ? (
                 <><span className="mono">{task.id}</span><span className="sep">·</span><span>{task.title}</span></>
@@ -274,7 +285,7 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
           </div>
         </div>
 
-        <div className="chat-hd-right">
+        <div className="ac-chat-hd-right">
           {!embedded && (
             <button className="btn" onClick={handleNew}>
               <span className="btn-glyph">◆</span>New
@@ -286,12 +297,12 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
             </div>
           )}
           {task && (
-            <button className={'btn ' + (running ? 'btn-stop' : 'btn-run')} onClick={handleToggleRun}>
-              <span className="btn-glyph">{running ? '■' : '▶'}</span>{running ? 'Stop' : 'Run'}
+            <button className={'btn ' + (taskRunning ? 'btn-stop' : 'btn-run')} onClick={handleToggleRun}>
+              <span className="btn-glyph">{taskRunning ? '■' : '▶'}</span>{taskRunning ? 'Stop' : 'Run'}
             </button>
           )}
-          {!task && running && (
-            <button className="btn btn-stop" onClick={() => { wsManager.send({ type: 'stop' }); setRunning(false); }}>
+          {!task && chatRunning && (
+            <button className="btn btn-stop" onClick={() => { wsManager.send({ type: 'stop' }); setChatRunning(false); }}>
               <span className="btn-glyph">■</span>Stop
             </button>
           )}
@@ -300,7 +311,7 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
 
       {/* ── Sessions tab ── */}
       {!embedded && tab === 'sessions' && (
-        <div className="chat-log">
+        <div className="ac-chat-log">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
             <select
               value={wsFilter}
@@ -317,10 +328,10 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
           </div>
           {loadingSessions && <div style={{ color: 'var(--fg-3)', fontSize: 12 }}>Loading…</div>}
           {!loadingSessions && activeSessions.length === 0 && (
-            <div className="chat-empty">
-              <div className="chat-empty-mark">◆</div>
-              <div className="chat-empty-title">No active sessions</div>
-              <div className="chat-empty-sub">Sessions from the last 7 days and non-done tasks appear here.</div>
+            <div className="ac-chat-empty">
+              <div className="ac-chat-empty-mark">◆</div>
+              <div className="ac-chat-empty-title">No active sessions</div>
+              <div className="ac-chat-empty-sub">Sessions from the last 7 days and non-done tasks appear here.</div>
             </div>
           )}
           {!loadingSessions && activeSessions.map(s => {
@@ -374,11 +385,11 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
       {/* ── Chat tab ── */}
       {(embedded || tab === 'chat') && (
         <>
-          <div className="chat-log" ref={logRef}>
+          <div className="ac-chat-log" ref={logRef}>
             {loadingHistory ? (
-              <div className="chat-empty">
-                <div className="chat-empty-mark">◆</div>
-                <div className="chat-empty-title">Loading history…</div>
+              <div className="ac-chat-empty">
+                <div className="ac-chat-empty-mark">◆</div>
+                <div className="ac-chat-empty-title">Loading history…</div>
               </div>
             ) : pickingAgent ? (
               /* ── Agent picker ── */
@@ -406,15 +417,15 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
                 </div>
               </div>
             ) : messages.length === 0 ? (
-              <div className="chat-empty">
-                <div className="chat-empty-mark" style={{ color: agentColor }}>◆</div>
-                <div className="chat-empty-title">New session · <span style={{ color: agentColor }}>{agentLabel}</span></div>
-                <div className="chat-empty-sub">Type below to start.</div>
+              <div className="ac-chat-empty">
+                <div className="ac-chat-empty-mark" style={{ color: agentColor }}>◆</div>
+                <div className="ac-chat-empty-title">New session · <span style={{ color: agentColor }}>{agentLabel}</span></div>
+                <div className="ac-chat-empty-sub">Type below to start.</div>
               </div>
             ) : (
               messages.map((m, i) => <MessageBubble key={i} msg={m} agentColor={agentColor} />)
             )}
-            {running && (
+            {chatRunning && (
               <div className="msg msg-typing">
                 <span className="msg-tag">···</span>
                 <span className="typing"><span /><span /><span /></span>
@@ -422,7 +433,7 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
             )}
           </div>
 
-          <div className="chat-input">
+          <div className="ac-chat-input">
             {/* Slash command palette */}
             {slashOptions.length > 0 && (
               <div style={{
@@ -457,13 +468,13 @@ export default function ChatPanel({ embedded = false }: { embedded?: boolean }) 
               placeholder={sessionId ? `Continue with ${agentLabel}… (Enter to send, / for commands)` : `Message ${agentLabel}… (Enter to send, / for commands)`}
               rows={2}
             />
-            <div className="chat-input-ft">
-              <div className="chat-input-meta">
+            <div className="ac-chat-input-ft">
+              <div className="ac-chat-input-meta">
                 <span className="kbd">↵</span><span className="muted">send</span>
                 <span className="sep">·</span>
                 <span className="kbd">⇧↵</span><span className="muted">newline</span>
               </div>
-              <button className="btn btn-primary" onClick={handleSend} disabled={!draft.trim() || running}>Send</button>
+              <button className="btn btn-primary" onClick={handleSend} disabled={!draft.trim()}>Send</button>
             </div>
           </div>
         </>

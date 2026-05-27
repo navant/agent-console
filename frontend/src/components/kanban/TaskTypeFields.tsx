@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useStore } from '../../store/useStore';
 import { TaskTypeDef } from '../../types';
 import {
@@ -56,12 +56,15 @@ export default function TaskTypeFields({
   const taskTypes = useStore(s => s.taskTypes);
   const workflowGroups = groupWorkflowsForSelect(workflows);
 
+  const isRalphLoop = workflowId === 'ralph-loop';
   const selectedType = taskTypeId ? taskTypes.find(t => t.id === taskTypeId) : null;
   const locked = !!selectedType;
   const agentLocked = locked && !!selectedType?.agent;
   const workflowLocked = locked && !!selectedType?.workflow;
   const skillsLocked = locked && (selectedType?.skills?.length ?? 0) > 0;
-  const showSkillSearch = skills.length >= 4;
+  const taskTypeDisabled = disabled || isRalphLoop;
+  const skillsDisabled = disabled || isRalphLoop || skillsLocked;
+  const showSkillSearch = skills.length >= 4 && !isRalphLoop;
 
   const filteredSkills = skillSearch.trim()
     ? skills.filter(s => {
@@ -72,11 +75,12 @@ export default function TaskTypeFields({
     : skills;
 
   const toggleSkill = (id: string) => {
-    if (skillsLocked || disabled) return;
+    if (skillsDisabled) return;
     onSkillIdsChange(skillIds.includes(id) ? skillIds.filter(x => x !== id) : [...skillIds, id]);
   };
 
   const handleTypeChange = (id: string) => {
+    if (isRalphLoop) return;
     onTaskTypeChange(id);
     if (id) {
       const applied = applyTaskTypeSelection(id, taskTypes);
@@ -88,22 +92,39 @@ export default function TaskTypeFields({
     }
   };
 
+  const handleWorkflowChange = (id: string) => {
+    onWorkflowChange(id);
+    if (id === 'ralph-loop') {
+      onTaskTypeChange('');
+      onSkillIdsChange([]);
+      onSkillSearchChange('');
+    }
+  };
+
+  useEffect(() => {
+    if (!isRalphLoop) return;
+    if (taskTypeId) onTaskTypeChange('');
+    if (skillIds.length > 0) onSkillIdsChange([]);
+  }, [isRalphLoop, taskTypeId, skillIds.length, onTaskTypeChange, onSkillIdsChange]);
+
   const selectedAgent = agentId ? agents.find(a => a.id === agentId) : null;
   const selectedWorkflow = findWorkflowById(workflows, workflowId);
   const archonAvailable = workflows.some(w => w.source === 'archon');
 
   return (
     <>
-      <div className="field">
+      <div className={'field' + (taskTypeDisabled ? ' field--inactive' : '')}>
         <label className="field-lbl">
           <span>Task type</span>
-          <span className="field-hint">optional — applies configured agent & skills</span>
+          <span className="field-hint">
+            {isRalphLoop ? 'not used with Ralph loop' : 'optional — applies configured agent & skills'}
+          </span>
         </label>
         <select
           className="text"
-          value={taskTypeId}
+          value={isRalphLoop ? '' : taskTypeId}
           onChange={e => handleTypeChange(e.target.value)}
-          disabled={disabled}
+          disabled={taskTypeDisabled}
         >
           <option value="">None (manual agent & skills)</option>
           {taskTypes.map(t => (
@@ -112,11 +133,15 @@ export default function TaskTypeFields({
             </option>
           ))}
         </select>
-        {selectedType && (
+        {isRalphLoop ? (
+          <span className="field-hint">
+            Ralph loop uses the task <strong>plan</strong> (stories) and built-in workflow — not task-type presets.
+          </span>
+        ) : selectedType ? (
           <span className="field-hint">
             Using type config — agent and skills are set by <span className="mono">{selectedType.id}</span>
           </span>
-        )}
+        ) : null}
       </div>
 
       {showWorkflow && (
@@ -128,7 +153,7 @@ export default function TaskTypeFields({
           <select
             className="text"
             value={workflowId}
-            onChange={e => onWorkflowChange(e.target.value)}
+            onChange={e => handleWorkflowChange(e.target.value)}
             disabled={disabled || workflowLocked}
           >
             {workflows.length === 0 && <option value="">Loading workflows…</option>}
@@ -152,9 +177,9 @@ export default function TaskTypeFields({
           {selectedWorkflow && (
             <span className="field-hint">{workflowRunHint(selectedWorkflow)}</span>
           )}
-          {workflowId === 'ralph-loop' && (
+          {isRalphLoop && (
             <span className="field-hint">
-              Tip: use a <strong>project</strong> task and generate a plan (stories) before Run.
+              On the task: <strong>PRD skill</strong> → PRD markdown, <strong>ralph skill</strong> → prd.json, then Run loop. Agent still applies.
             </span>
           )}
         </div>
@@ -181,14 +206,24 @@ export default function TaskTypeFields({
         )}
       </div>
 
-      <div className="field">
+      <div className={'field' + (isRalphLoop ? ' field--inactive' : '')}>
         <label className="field-lbl">
           <span>Skills</span>
           <span className="field-hint">
-            {skillsLocked ? 'from task type' : skillIds.length > 0 ? `${skillIds.length} selected` : 'optional'}
+            {isRalphLoop
+              ? 'not used during Ralph loop'
+              : skillsLocked
+                ? 'from task type'
+                : skillIds.length > 0
+                  ? `${skillIds.length} selected`
+                  : 'optional'}
           </span>
         </label>
-        {skills.length === 0 ? (
+        {isRalphLoop ? (
+          <p className="field-hint">
+            Use <span className="mono">prd</span> and <span className="mono">ralph</span> from the task planning panel — not as run-time skills here.
+          </p>
+        ) : skills.length === 0 ? (
           <p className="field-hint">No skills found</p>
         ) : (
           <>
@@ -204,7 +239,7 @@ export default function TaskTypeFields({
                 />
               </div>
             )}
-            <div className={'chips skill-picker' + (skillsLocked ? ' is-locked' : '')}>
+            <div className={'chips skill-picker' + (skillsDisabled ? ' is-locked' : '')}>
               {filteredSkills.map(skill => {
                 const on = skillIds.includes(skill.id);
                 return (
@@ -213,7 +248,7 @@ export default function TaskTypeFields({
                     type="button"
                     className={'chip' + (on ? ' is-on' : '')}
                     onClick={() => toggleSkill(skill.id)}
-                    disabled={disabled || skillsLocked}
+                    disabled={skillsDisabled}
                   >
                     <span className="chip-tick">{on ? '✓' : '○'}</span>
                     <span>{skill.name}</span>

@@ -56,7 +56,7 @@ Memory is **not** pasted into kanban prompts or chat messages. Agents should use
 - **claude-mem** — worker + MCP; SessionEnd hook syncs `.claude/MEMORY.md`.
 - **Read** / **Skill** — `.claude/memory.md` (manual), agent memory files.
 
-Headless task runs use `--setting-sources user` (keeps OAuth, skips project SessionEnd hooks on the child). Interactive `claude` in the repo may still load `@.claude/MEMORY.md` from project `CLAUDE.md` — separate from Agent Console prompt building.
+Headless task runs use `--setting-sources user,project` with `cwd` set to the active workspace so `.claude/skills` (e.g. `prd`, `ralph`) resolve via the Skill tool. SessionEnd hooks skip when `AGENT_CONSOLE_HEADLESS=1` is set on the child process.
 
 ## Architecture
 

@@ -3,11 +3,12 @@ import { useStore } from '../../store/useStore';
 import { createTask, getPrdFiles } from '../../api/client';
 import { PrdFile } from '../../types';
 import TaskTypeFields from './TaskTypeFields';
+import { isRalphLoopWorkflow } from '../../utils/workflowOptions';
 
 interface CreateTaskModalProps {
   open: boolean;
   onClose: () => void;
-  onCreated?: (taskId: string, isProject: boolean) => void;
+  onCreated?: (taskId: string, openPlanEditor: boolean) => void;
 }
 
 export default function CreateTaskModal({ open, onClose, onCreated }: CreateTaskModalProps) {
@@ -70,7 +71,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: CreateTask
       });
       addTask(task);
       onClose();
-      onCreated?.(task.id, false);
+      onCreated?.(task.id, isRalphLoopWorkflow(workflowId));
     } catch (err) {
       console.error('Failed to create task:', err);
     } finally {

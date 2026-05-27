@@ -14,6 +14,8 @@ import {
   PrdFile,
   WorkspaceTab,
   WorkspaceViewId,
+  HomeCapabilityId,
+  ChatDockMode,
 } from '../types';
 
 const VIEW_LABELS: Record<WorkspaceViewId, string> = {
@@ -27,7 +29,19 @@ const VIEW_LABELS: Record<WorkspaceViewId, string> = {
   prd: 'Planning',
   goals: 'Goals',
   settings: 'Settings',
+  setup: 'Setup workspace',
 };
+
+const HOME_TO_VIEW: Record<HomeCapabilityId, WorkspaceViewId> = {
+  chat: 'chat',
+  tasks: 'tasks',
+  setup: 'setup',
+  settings: 'settings',
+  goals: 'goals',
+  prd: 'prd',
+};
+
+const APP_SCREEN_KEY = 'ac-app-screen';
 
 const DEFAULT_TABS: WorkspaceTab[] = [
   { id: 'tab-tasks', view: 'tasks', label: 'Tasks', closable: false },
@@ -74,13 +88,17 @@ interface Store {
   selectedAgent: string | null;
   chatAgent: string;
   messages: ChatMessage[];
-  running: boolean;
+  /** True while a chat/slash message is in flight */
+  chatRunning: boolean;
+  /** True while a kanban task / plan phase / goal run is in flight */
+  taskRunning: boolean;
   modal: 'agent' | 'workspace' | 'task' | 'workflow' | 'plan' | null;
   expandedSections: Record<string, boolean>;
   previewSkillId: string | null;
   theme: 'dark' | 'light';
   accent: string;
   density: 'compact' | 'regular' | 'comfy';
+  ascend: boolean;
   searchQuery: string;
   currentSessionId: string | null;
   wsConnected: boolean;
@@ -95,6 +113,14 @@ interface Store {
   autoQueue: boolean;
   taskTypes: TaskTypeDef[];
   chatSkillBootstrap: boolean;
+  appScreen: 'studio' | 'coder';
+  chatDock: ChatDockMode;
+  sideOpen: boolean;
+  sidePanel: 'chats' | 'tasks';
+  workspacePickerOpen: boolean;
+  pendingHomeCap: HomeCapabilityId | null;
+  settingsSection: string | null;
+  planEditorTaskId: string | null;
 
   // Actions — data
   loadAll: () => Promise<void>;
@@ -128,13 +154,15 @@ interface Store {
   setChatAgent: (id: string) => void;
   addMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
-  setRunning: (running: boolean) => void;
+  setChatRunning: (running: boolean) => void;
+  setTaskRunning: (running: boolean) => void;
   setModal: (modal: Store['modal']) => void;
   toggleSection: (section: string) => void;
   setPreviewSkillId: (id: string | null) => void;
   setTheme: (theme: 'dark' | 'light') => void;
   setAccent: (accent: string) => void;
   setDensity: (density: 'compact' | 'regular' | 'comfy') => void;
+  setAscend: (ascend: boolean) => void;
   setSearchQuery: (q: string) => void;
   setCurrentSessionId: (id: string | null) => void;
   setWsConnected: (connected: boolean) => void;
@@ -154,6 +182,16 @@ interface Store {
   bindTaskChatContext: (taskId: string) => Promise<void>;
   continueTaskInChat: (taskId: string) => Promise<void>;
   togglePinnedDock: (view: WorkspaceViewId) => void;
+  setAppScreen: (screen: 'studio' | 'coder') => void;
+  setChatDock: (dock: ChatDockMode) => void;
+  setSideOpen: (open: boolean) => void;
+  setSidePanel: (panel: 'chats' | 'tasks') => void;
+  setWorkspacePickerOpen: (open: boolean) => void;
+  setPendingHomeCap: (cap: HomeCapabilityId | null) => void;
+  setSettingsSection: (section: string | null) => void;
+  setPlanEditorTaskId: (taskId: string | null) => void;
+  openFromHome: (cap: HomeCapabilityId) => void;
+  goHome: () => void;
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -173,7 +211,8 @@ export const useStore = create<Store>((set, get) => ({
   selectedAgent: null,
   chatAgent: '',
   messages: [],
-  running: false,
+  chatRunning: false,
+  taskRunning: false,
   modal: null,
   expandedSections: {
     memory: false,
@@ -187,6 +226,7 @@ export const useStore = create<Store>((set, get) => ({
   theme: 'light',
   accent: '#7aa7d4',
   density: 'regular',
+  ascend: false,
   searchQuery: '',
   currentSessionId: null,
   wsConnected: false,
@@ -201,6 +241,21 @@ export const useStore = create<Store>((set, get) => ({
   autoQueue: true,
   taskTypes: [],
   chatSkillBootstrap: false,
+  appScreen: (() => {
+    try {
+      const s = localStorage.getItem(APP_SCREEN_KEY);
+      return s === 'coder' ? 'coder' : 'studio';
+    } catch {
+      return 'studio';
+    }
+  })(),
+  chatDock: 'center',
+  sideOpen: true,
+  sidePanel: 'chats',
+  workspacePickerOpen: false,
+  pendingHomeCap: null,
+  settingsSection: null,
+  planEditorTaskId: null,
 
   loadAll: async () => {
     try {
@@ -329,12 +384,13 @@ export const useStore = create<Store>((set, get) => ({
   setTaskComments: (taskId, comments) => set(s => ({
     taskComments: { ...s.taskComments, [taskId]: comments },
   })),
-  appendTaskComment: (taskId, comment) => set(s => ({
-    taskComments: {
-      ...s.taskComments,
-      [taskId]: [...(s.taskComments[taskId] ?? []), comment],
-    },
-  })),
+  appendTaskComment: (taskId, comment) => set(s => {
+    const prev = s.taskComments[taskId] ?? [];
+    const idx = prev.findIndex(c => c.id === comment.id);
+    const next =
+      idx >= 0 ? prev.map((c, i) => (i === idx ? { ...c, ...comment } : c)) : [...prev, comment];
+    return { taskComments: { ...s.taskComments, [taskId]: next } };
+  }),
   toggleSkillSelection: (id) => set(s => ({
     selectedSkills: s.selectedSkills.includes(id)
       ? s.selectedSkills.filter(x => x !== id)
@@ -347,7 +403,8 @@ export const useStore = create<Store>((set, get) => ({
   setChatAgent: (id) => set({ chatAgent: id }),
   addMessage: (msg) => set(s => ({ messages: [...s.messages, msg] })),
   clearMessages: () => set({ messages: [] }),
-  setRunning: (running) => set({ running }),
+  setChatRunning: (chatRunning) => set({ chatRunning }),
+  setTaskRunning: (taskRunning) => set({ taskRunning }),
   setModal: (modal) => set({ modal }),
   toggleSection: (section) => set(s => ({
     expandedSections: {
@@ -359,6 +416,7 @@ export const useStore = create<Store>((set, get) => ({
   setTheme: (theme) => set({ theme }),
   setAccent: (accent) => set({ accent }),
   setDensity: (density) => set({ density }),
+  setAscend: (ascend) => set({ ascend }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setCurrentSessionId: (currentSessionId) => set({ currentSessionId }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
@@ -484,11 +542,62 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   continueTaskInChat: async (taskId) => {
-    get().openTaskTab(taskId);
+    await get().bindTaskChatContext(taskId);
+    set({ chatDock: 'center', selectedTaskId: taskId });
+    get().openWorkspaceTab('chat');
   },
 
   togglePinnedDock: (view) => {
     const { pinnedDock } = get();
     set({ pinnedDock: pinnedDock === view ? null : view });
+  },
+
+  setAppScreen: (appScreen) => {
+    try {
+      localStorage.setItem(APP_SCREEN_KEY, appScreen);
+    } catch { /* ignore */ }
+    set({ appScreen });
+  },
+
+  setChatDock: (chatDock) => set({ chatDock }),
+
+  setSideOpen: (sideOpen) => set({ sideOpen }),
+
+  setSidePanel: (sidePanel) => set({ sidePanel }),
+
+  setWorkspacePickerOpen: (workspacePickerOpen) => set({ workspacePickerOpen }),
+
+  setPendingHomeCap: (pendingHomeCap) => set({ pendingHomeCap }),
+
+  setSettingsSection: (settingsSection) => set({ settingsSection }),
+  setPlanEditorTaskId: (planEditorTaskId) => set({ planEditorTaskId }),
+
+  openFromHome: (cap) => {
+    const view = HOME_TO_VIEW[cap];
+    const { activeWorkspaceId, settingsSection } = get();
+
+    if (!activeWorkspaceId && cap !== 'setup') {
+      set({ pendingHomeCap: cap, workspacePickerOpen: true, appScreen: 'studio' });
+      return;
+    }
+
+    if (cap === 'settings' && !settingsSection) {
+      set({ settingsSection: 'paths' });
+    }
+
+    get().openWorkspaceTab(view);
+    set({
+      appScreen: 'coder',
+      pendingHomeCap: null,
+      ...(view === 'chat' ? { chatDock: 'center' as ChatDockMode, sidePanel: 'chats' as const } : {}),
+      ...(view === 'tasks' ? { sidePanel: 'tasks' as const } : {}),
+    });
+    try {
+      localStorage.setItem(APP_SCREEN_KEY, 'coder');
+    } catch { /* ignore */ }
+  },
+
+  goHome: () => {
+    get().setAppScreen('studio');
   },
 }));

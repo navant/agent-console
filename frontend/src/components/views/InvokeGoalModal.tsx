@@ -43,7 +43,7 @@ export default function InvokeGoalModal({
   const workflows = useStore(s => s.workflows);
   const taskTypes = useStore(s => s.taskTypes);
   const addTask = useStore(s => s.addTask);
-  const setRunning = useStore(s => s.setRunning);
+  const setTaskRunning = useStore(s => s.setTaskRunning);
   const openTaskTab = useStore(s => s.openTaskTab);
 
   const [title, setTitle] = useState('');
@@ -105,7 +105,7 @@ export default function InvokeGoalModal({
       onCreated?.(task.id);
       openTaskTab(task.id);
       runTask(task.id);
-      setRunning(true);
+      setTaskRunning(true);
     } catch (err) {
       console.error('Failed to invoke goal as task:', err);
     } finally {

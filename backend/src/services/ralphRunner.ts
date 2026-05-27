@@ -4,8 +4,7 @@ import {
   appendTaskProgress,
   getAgent,
   getAgentSoulPath,
-  buildSkillInvocationPrompt,
-  ensureSkillToolAllowed,
+  getPathSettings,
   getTask,
   getTaskPlan,
   saveTask,
@@ -16,6 +15,7 @@ import { renderWorkflowTemplate } from './workflowRenderer';
 import { resolveWorkflow } from './workflowStore';
 import { TaskConfig } from '../types';
 import { expandHome } from '../config';
+import path from 'path';
 
 export type RalphCallbacks = {
   onMessage: RunOptions['onMessage'];
@@ -52,6 +52,12 @@ export async function runRalphLoop(
   }
 
   const plan = getTaskPlan(taskId, workspacePath);
+  if (plan.userStories.length === 0) {
+    throw new Error(
+      'Task plan is empty. Generate or edit stories in the task plan (prd.json) before running Ralph loop.'
+    );
+  }
+
   const pending = plan.userStories
     .filter(s => !s.passes)
     .sort((a, b) => a.priority - b.priority);
@@ -66,7 +72,12 @@ export async function runRalphLoop(
 
   ralphRunning = true;
   const resolvedWs = expandHome(workspacePath);
-  const skillPrefix = buildSkillInvocationPrompt(task.skills, workspacePath);
+  const settings = getPathSettings();
+  const tasksRel = settings.tasks.replace(/^\.\//, '');
+  const taskPlanRel = path.join(tasksRel, taskId, 'prd.json');
+  const taskProgressRel = path.join(tasksRel, taskId, 'progress.txt');
+  // Ralph loop uses plan stories + workflow template only — not task-type presets or task.skills.
+  const skillPrefix = '';
   const soulPath = agent ? getAgentSoulPath(task.agent, workspacePath) : '';
 
   task.status = 'running';
@@ -84,7 +95,8 @@ export async function runRalphLoop(
     const storyPrompt = stripMemoryFromPrompt(
       renderWorkflowTemplate(workflow.template, { story, memory: '' })
     );
-    const fullPrompt = skillPrefix ? `${skillPrefix}\n\n---\n\n${storyPrompt}` : storyPrompt;
+    const pathNote = `Task plan: \`${taskPlanRel}\` (Agent Console updates \`passes\` after each story — do not edit that file unless asked). Progress log: \`${taskProgressRel}\`.`;
+    const fullPrompt = [skillPrefix, pathNote, storyPrompt].filter(Boolean).join('\n\n---\n\n');
 
     appendTaskProgress(
       taskId,
@@ -100,10 +112,7 @@ export async function runRalphLoop(
         agent: {
           id: agent?.id ?? '',
           model: agent?.model ?? '',
-          tools:
-            task.skills.length > 0
-              ? ensureSkillToolAllowed(agent?.tools ?? [])
-              : agent?.tools ?? [],
+          tools: agent?.tools ?? [],
         },
         soulPath,
         workspacePath: resolvedWs,

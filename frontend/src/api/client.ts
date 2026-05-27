@@ -291,8 +291,28 @@ export const addTaskComment = (id: string, text: string) =>
     body: JSON.stringify({ text }),
   });
 
+export const extractTaskQuestions = (taskId: string) =>
+  request<{ comment: TaskComment }>(`/tasks/${taskId}/questions/extract`, {
+    method: 'POST',
+  });
+
+export const answerTaskQuestions = (
+  taskId: string,
+  commentId: string,
+  answers: Record<string, string | string[]>
+) =>
+  request<{ ok: boolean; prdUpdated: boolean; prdPath?: string; userComment: TaskComment }>(
+    `/tasks/${taskId}/questions/${commentId}/answer`,
+    { method: 'POST', body: JSON.stringify({ answers }) }
+  );
+
 export const runTask = (taskId: string, nudge = false) =>
   wsManager.send({ type: 'run_task', taskId, nudge });
+
+export const runTaskPlanPhase = (
+  taskId: string,
+  phase: 'write-prd' | 'convert-ralph'
+) => wsManager.send({ type: 'run_task_plan', taskId, phase });
 
 export const startAutoQueue = () => wsManager.send({ type: 'auto_queue_start' });
 export const stopAutoQueue = () => wsManager.send({ type: 'auto_queue_stop' });

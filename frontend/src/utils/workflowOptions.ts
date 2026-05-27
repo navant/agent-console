@@ -11,6 +11,10 @@ export interface WorkflowGroup {
 
 const BUILTIN_ORDER = ['single-shot', 'ralph-loop'] as const;
 
+export function isRalphLoopWorkflow(workflowId: string): boolean {
+  return workflowId === 'ralph-loop';
+}
+
 export function groupWorkflowsForSelect(workflows: WorkflowConfig[]): WorkflowGroup[] {
   const builtin = workflows
     .filter(w => w.source === 'builtin')

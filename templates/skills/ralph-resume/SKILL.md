@@ -9,6 +9,15 @@ Resume Ralph execution after Cursor has been working on stories.
 
 ---
 
+## Paths
+
+- **Shell Ralph:** `scripts/ralph/progress.txt` and `scripts/ralph/prd.json`
+- **Agent Console task (`ralph-loop`):** `.claude/tasks/<taskId>/progress.txt` and `.claude/tasks/<taskId>/prd.json`
+
+Below assumes **shell** paths; substitute task paths when resuming an in-app loop.
+
+---
+
 ## The Job
 
 1. Check `scripts/ralph/progress.txt` for `[CURSOR]` entries

@@ -21,6 +21,7 @@ import { runSlashCommand, isSlashRunning } from './ptyRunner';
 import { buildGoalSlashCommand } from './goalsStore';
 import { isArchonWorkflowId, isRalphLoopWorkflowId, SINGLE_SHOT_WORKFLOW_ID } from './workflowStore';
 import { runRalphLoop, isRalphRunning, stopRalphRunner } from './ralphRunner';
+import { getRalphLoopRunBlockReason } from './ralphLoopGuards';
 import { TaskConfig, WSServerMessage } from '../types';
 
 export type RunSource = 'manual' | 'queue' | 'nudge';
@@ -89,9 +90,19 @@ export function executeTask(
     const pendingFeedback = hasPendingUserFeedback(comments);
     const useNudgePrompt = nudge || pendingFeedback;
     const workflowId = task.workflow?.trim() || SINGLE_SHOT_WORKFLOW_ID;
+    const isRalphLoop = isRalphLoopWorkflowId(workflowId) && !isGoalTask(task);
+
+    const ralphBlock = isRalphLoop
+      ? getRalphLoopRunBlockReason(task, workspacePath, comments, { nudge })
+      : null;
+    if (ralphBlock) {
+      sendTo({ type: 'error', message: ralphBlock });
+      reject(new Error(ralphBlock));
+      return;
+    }
+
     const useArchon = isArchonWorkflowId(workflowId) && !useNudgePrompt && !isGoalTask(task);
-    const useRalph =
-      isRalphLoopWorkflowId(workflowId) && !useNudgePrompt && !isGoalTask(task) && !useArchon;
+    const useRalph = isRalphLoop && !useArchon;
 
     const commentTracker = createRunCommentTracker(
       workspacePath,
@@ -192,6 +203,7 @@ export function executeTask(
       })
         .then(() => {
           commentTracker.onDone();
+          const latest = getTask(task.id, workspacePath) ?? task;
           appendTaskProgress(
             task.id,
             workspacePath,
@@ -199,12 +211,19 @@ export function executeTask(
             line => broadcast({ type: 'progress_append', taskId: task.id, line })
           );
           sendTo({ type: 'done', result: 'Ralph loop finished — moved to review' });
+          broadcast({ type: 'task_update', task: latest });
           finish();
         })
         .catch(err => {
-          commentTracker.onError(String(err));
-          sendTo({ type: 'error', message: String(err) });
-          fail(err instanceof Error ? err : new Error(String(err)));
+          const message = err instanceof Error ? err.message : String(err);
+          commentTracker.onError(message);
+          task.status = 'todo';
+          task.updatedAt = new Date().toISOString();
+          saveTask(task, workspacePath);
+          broadcast({ type: 'task_update', task });
+          sendTo({ type: 'error', message });
+          sendTo({ type: 'done', result: '' });
+          finish();
         });
     };
 

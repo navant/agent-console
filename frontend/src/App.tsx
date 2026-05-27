@@ -2,33 +2,51 @@ import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
 import { wsManager } from './api/client';
 import { WSServerMessage } from './types';
-import Layout from './components/layout/Layout';
-import Workspace from './components/workspace/Workspace';
+import AppShell from './components/shell/AppShell';
 import CreateTaskModal from './components/kanban/CreateTaskModal';
 import WorkflowModal from './components/kanban/WorkflowModal';
 import AgentModal from './components/agents/AgentModal';
 import WorkspaceModal from './components/workspaces/WorkspaceModal';
+import PlanEditor from './components/kanban/PlanEditor';
 
 export default function App() {
-  const theme = useStore(s => s.theme);
-  const accent = useStore(s => s.accent);
-  const density = useStore(s => s.density);
   const modal = useStore(s => s.modal);
   const setModal = useStore(s => s.setModal);
   const loadAll = useStore(s => s.loadAll);
   const addMessage = useStore(s => s.addMessage);
-  const setRunning = useStore(s => s.setRunning);
+  const setChatRunning = useStore(s => s.setChatRunning);
+  const setTaskRunning = useStore(s => s.setTaskRunning);
   const setCurrentSessionId = useStore(s => s.setCurrentSessionId);
   const setWsConnected = useStore(s => s.setWsConnected);
   const updateTask = useStore(s => s.updateTask);
   const appendTaskProgress = useStore(s => s.appendTaskProgress);
   const appendTaskComment = useStore(s => s.appendTaskComment);
   const setAutomation = useStore(s => s.setAutomation);
+  const planEditorTaskId = useStore(s => s.planEditorTaskId);
+  const setPlanEditorTaskId = useStore(s => s.setPlanEditorTaskId);
   const openTaskTab = useStore(s => s.openTaskTab);
+  const pendingPrdPath = useStore(s => s.pendingPrdPath);
+  const pendingGoalPath = useStore(s => s.pendingGoalPath);
+  const openWorkspaceTab = useStore(s => s.openWorkspaceTab);
+  const setAppScreen = useStore(s => s.setAppScreen);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (pendingPrdPath) {
+      setAppScreen('coder');
+      openWorkspaceTab('prd');
+    }
+  }, [pendingPrdPath, openWorkspaceTab, setAppScreen]);
+
+  useEffect(() => {
+    if (pendingGoalPath) {
+      setAppScreen('coder');
+      openWorkspaceTab('goals');
+    }
+  }, [pendingGoalPath, openWorkspaceTab, setAppScreen]);
 
   useEffect(() => {
     wsManager.connect();
@@ -49,13 +67,15 @@ export default function App() {
           addMessage({ type: 'tool_result', text: msg.content });
           break;
         case 'done':
-          setRunning(false);
+          setChatRunning(false);
+          setTaskRunning(false);
           if (msg.result && msg.result !== 'stopped' && msg.result !== 'Task completed') {
             addMessage({ type: 'text', text: msg.result });
           }
           break;
         case 'error':
-          setRunning(false);
+          setChatRunning(false);
+          setTaskRunning(false);
           addMessage({ type: 'system', text: `ERROR: ${msg.message}` });
           break;
         case 'task_update':
@@ -82,18 +102,13 @@ export default function App() {
       clearInterval(interval);
     };
   }, [
-    addMessage, setRunning, setCurrentSessionId, setWsConnected,
+    addMessage, setChatRunning, setTaskRunning, setCurrentSessionId, setWsConnected,
     updateTask, appendTaskProgress, appendTaskComment, setAutomation,
   ]);
 
   return (
-    <div
-      className={`app ${theme} density-${density}`}
-      style={{ '--accent': accent } as React.CSSProperties}
-    >
-      <Layout>
-        <Workspace />
-      </Layout>
+    <>
+      <AppShell />
 
       <CreateTaskModal
         open={modal === 'task'}
@@ -103,6 +118,11 @@ export default function App() {
       <WorkflowModal open={modal === 'workflow'} onClose={() => setModal(null)} />
       <AgentModal open={modal === 'agent'} onClose={() => setModal(null)} />
       <WorkspaceModal open={modal === 'workspace'} onClose={() => setModal(null)} />
-    </div>
+      <PlanEditor
+        open={planEditorTaskId !== null}
+        taskId={planEditorTaskId}
+        onClose={() => setPlanEditorTaskId(null)}
+      />
+    </>
   );
 }

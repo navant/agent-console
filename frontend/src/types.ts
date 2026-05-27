@@ -35,7 +35,12 @@ export type WorkspaceViewId =
   | 'workflows'
   | 'prd'
   | 'goals'
-  | 'settings';
+  | 'settings'
+  | 'setup';
+
+export type HomeCapabilityId = 'chat' | 'tasks' | 'setup' | 'settings' | 'goals' | 'prd';
+
+export type ChatDockMode = 'center' | 'side';
 
 export interface PathSettings {
   prd: string;
@@ -117,7 +122,20 @@ export interface TaskConfig {
 }
 
 export type TaskCommentAuthor = 'user' | 'agent' | 'system';
-export type TaskCommentKind = 'comment' | 'activity';
+export type TaskCommentKind = 'comment' | 'activity' | 'questions';
+
+export interface AgentQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface AgentQuestion {
+  id: string;
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options?: AgentQuestionOption[];
+}
 
 export interface TaskComment {
   id: string;
@@ -125,6 +143,8 @@ export interface TaskComment {
   authorName?: string;
   body: string;
   kind: TaskCommentKind;
+  questions?: AgentQuestion[];
+  answeredAt?: string;
   createdAt: string;
 }
 
@@ -202,6 +222,15 @@ export interface ChatMessage {
   tool?: string;
   input?: unknown;
 }
+
+export type WSClientMessage =
+  | { type: 'run_task'; taskId: string; nudge?: boolean }
+  | { type: 'run_task_plan'; taskId: string; phase: 'write-prd' | 'convert-ralph' }
+  | { type: 'auto_queue_start' }
+  | { type: 'auto_queue_stop' }
+  | { type: 'chat'; message: string; agentName: string; sessionId?: string; taskId?: string; bootstrapSkills?: boolean }
+  | { type: 'slash_command'; command: string; sessionId?: string }
+  | { type: 'stop' };
 
 export type WSServerMessage =
   | { type: 'session_start'; sessionId: string; taskId: string }

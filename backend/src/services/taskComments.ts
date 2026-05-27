@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { TaskComment, TaskCommentsFile } from '../types';
 import { taskDir } from './fileStore';
+import { parseAskUserQuestions, parseQuestionsFromAgentText } from './taskQuestions';
 
 function commentsPath(workspacePath: string, taskId: string): string {
   return path.join(taskDir(workspacePath, taskId), 'comments.json');
@@ -39,11 +40,27 @@ export function addTaskComment(
     authorName: data.authorName,
     body: data.body,
     kind: data.kind,
+    questions: data.questions,
+    answeredAt: data.answeredAt,
     createdAt: data.createdAt ?? new Date().toISOString(),
   };
   comments.push(comment);
   saveComments(workspacePath, taskId, comments);
   return comment;
+}
+
+export function updateTaskComment(
+  workspacePath: string,
+  taskId: string,
+  commentId: string,
+  patch: Partial<Pick<TaskComment, 'body' | 'answeredAt' | 'questions'>>
+): TaskComment | null {
+  const comments = getTaskComments(workspacePath, taskId);
+  const idx = comments.findIndex(c => c.id === commentId);
+  if (idx < 0) return null;
+  comments[idx] = { ...comments[idx], ...patch };
+  saveComments(workspacePath, taskId, comments);
+  return comments[idx];
 }
 
 export function hasPendingUserFeedback(comments: TaskComment[]): boolean {
@@ -58,7 +75,7 @@ export function hasPendingUserFeedback(comments: TaskComment[]): boolean {
 
 function commentsForPrompt(comments: TaskComment[]): TaskComment[] {
   const dialogue = comments.filter(c => c.kind === 'comment');
-  const activity = comments.filter(c => c.kind === 'activity');
+  const activity = comments.filter(c => c.kind === 'activity' || c.kind === 'questions');
 
   const runNoise = /^Run (started|failed)/i;
   const toolExitNoise =
@@ -83,6 +100,9 @@ export function formatCommentsForPrompt(
 
   const lines = slice.map(c => {
     const name = c.authorName ?? (c.author === 'user' ? 'User' : c.author === 'agent' ? 'Agent' : 'System');
+    if (c.kind === 'questions') {
+      return `- [questions · ${name}] ${c.answeredAt ? 'Answered' : 'Awaiting answers'}: ${c.body}`;
+    }
     if (c.kind === 'activity') return `- [activity · ${name}] ${c.body}`;
     const body = c.body.length > 2000 ? `${c.body.slice(0, 2000)}…` : c.body;
     return `- [${name}] ${body}`;
@@ -137,6 +157,7 @@ export function createRunCommentTracker(
 ) {
   let textBuffer = '';
   let toolUseCount = 0;
+  let pendingQuestionsPosted = false;
   const runStartedAt = Date.now();
 
   const persist = (data: Omit<TaskComment, 'id' | 'createdAt'>) => {
@@ -150,7 +171,13 @@ export function createRunCommentTracker(
       // Omit "Run started" — it flooded the prompt when auto-queue retried failed tasks.
     },
 
-    onMessage(msg: { type: string; content?: string; tool?: string; result?: string }) {
+    onMessage(msg: {
+      type: string;
+      content?: string;
+      tool?: string;
+      input?: unknown;
+      result?: string;
+    }) {
       if (msg.type === 'text' && msg.content?.trim()) {
         textBuffer += (textBuffer ? '\n\n' : '') + msg.content.trim();
       } else if (msg.type === 'done' && msg.result?.trim()) {
@@ -160,6 +187,17 @@ export function createRunCommentTracker(
         }
       } else if (msg.type === 'tool_use' && msg.tool) {
         toolUseCount++;
+        const parsed = parseAskUserQuestions(msg.tool, msg.input);
+        if (parsed?.length) {
+          pendingQuestionsPosted = true;
+          persist({
+            author: 'agent',
+            authorName: agentName,
+            kind: 'questions',
+            body: 'Agent asked clarifying questions — answer below (saved to linked PRD when you submit).',
+            questions: parsed,
+          });
+        }
       }
     },
 
@@ -171,14 +209,48 @@ export function createRunCommentTracker(
       const substantive = runHadSubstantiveOutput(toolUseCount, body);
       const emptyRun = toolUseCount === 0 && body.length === 0;
 
-      if (substantive && body) {
+      if (!pendingQuestionsPosted && body) {
+        const fromText = parseQuestionsFromAgentText(body);
+        if (fromText?.length) {
+          pendingQuestionsPosted = true;
+          persist({
+            author: 'agent',
+            authorName: agentName,
+            kind: 'questions',
+            body: 'Agent asked clarifying questions — answer in Questions & answers (linked PRD when you submit).',
+            questions: fromText,
+          });
+          persist({
+            author: 'system',
+            authorName: 'System',
+            kind: 'activity',
+            body: 'Exploration notes are omitted here — use Questions & answers below.',
+          });
+          textBuffer = '';
+          return {
+            substantive: true,
+            toolUseCount,
+            durationMs,
+            textLength: 0,
+          };
+        }
+      }
+
+      if (pendingQuestionsPosted && !body) {
+        persist({
+          author: 'system',
+          authorName: 'System',
+          kind: 'activity',
+          body: 'Waiting for your answers in Questions & answers.',
+        });
+      } else if (substantive && body && !pendingQuestionsPosted) {
         persist({
           author: 'agent',
           authorName: agentName,
           kind: 'comment',
           body,
         });
-      } else if (emptyRun) {
+      } else if (emptyRun && !pendingQuestionsPosted) {
         persist({
           author: 'system',
           authorName: 'System',

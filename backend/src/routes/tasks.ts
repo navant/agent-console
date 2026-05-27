@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { spawn } from 'child_process';
+import path from 'path';
 import {
   listTasks,
   getTask,
@@ -19,9 +20,18 @@ import {
 import { resolveTaskTypeFields } from '../services/taskTypesStore';
 import { PlanConfig, TaskConfig, UserStory } from '../types';
 import { renderWorkflowTemplate } from '../services/workflowRenderer';
-import { addTaskComment, getTaskComments } from '../services/taskComments';
+import { addTaskComment, getTaskComments, updateTaskComment } from '../services/taskComments';
+import {
+  appendAnswersToPrd,
+  formatAnswersBody,
+  findPendingQuestionsComment,
+  parseQuestionsFromAgentText,
+} from '../services/taskQuestions';
+import type { QuestionAnswers } from '../services/taskQuestions';
 import { onTaskCommentAdded } from '../services/taskQueue';
 import { mergeTaskFromMarkdownContent, readTaskMarkdown } from '../services/taskMarkdown';
+import { createPrdFile } from '../services/prdStore';
+import { isRalphLoopWorkflowId } from '../services/workflowStore';
 
 let broadcast: ((msg: unknown) => void) | null = null;
 
@@ -91,6 +101,22 @@ router.post('/', (req: Request, res: Response) => {
     });
     if (!resolved.workflow) return res.status(400).json({ error: 'workflow is required' });
 
+    let prdPath = body.prd;
+    if (!prdPath && isRalphLoopWorkflowId(resolved.workflow)) {
+      const slug = body.title
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 48) || 'feature';
+      const prd = createPrdFile(
+        wsPath,
+        `prd-${slug}`,
+        `# ${body.title}\n\n${(body.description || '').trim()}\n`
+      );
+      prdPath = prd.path;
+    }
+
     const task = createTask(
       {
         title: body.title,
@@ -98,7 +124,7 @@ router.post('/', (req: Request, res: Response) => {
         workflow: resolved.workflow,
         skills: resolved.skills,
         description: body.description,
-        prd: body.prd,
+        prd: prdPath,
         goal: body.goal,
         taskType: resolved.taskType,
       },
@@ -226,7 +252,9 @@ router.put('/:id/plan', (req: Request, res: Response) => {
     const plan = req.body as PlanConfig;
     saveTaskPlan(req.params.id, wsPath, plan);
 
-    if (task.type === 'project' && plan.userStories.length > 0 && task.status === 'todo') {
+    const needsPlan =
+      task.workflow === 'ralph-loop' || task.type === 'project';
+    if (needsPlan && plan.userStories.length > 0 && task.status === 'todo') {
       task.status = 'planned';
       task.updatedAt = new Date().toISOString();
       saveTask(task, wsPath);
@@ -254,15 +282,22 @@ router.post('/:id/plan/generate', (req: Request, res: Response) => {
 Return ONLY valid JSON in this format:
 {"userStories":[{"id":"US-001","title":"...","description":"...","acceptanceCriteria":["..."],"priority":1,"passes":false}]}`;
 
+    const resolvedWs = path.resolve(wsPath);
     const args = [
       '-p', `${systemPrompt}\n\nTask:\n${promptText}`,
       '--output-format', 'json',
       '--dangerously-skip-permissions',
       '--setting-sources',
-      'user',
+      'user,project',
+      '--add-dir',
+      resolvedWs,
     ];
 
-    const proc = spawn('claude', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn('claude', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: resolvedWs,
+      env: { ...process.env, AGENT_CONSOLE_HEADLESS: '1' },
+    });
     let stdout = '';
     let stderr = '';
 
@@ -360,6 +395,113 @@ router.get('/:id/comments', (req: Request, res: Response) => {
     const task = getTask(req.params.id, wsPath);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.json({ comments: getTaskComments(wsPath, req.params.id) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.post('/:id/questions/extract', (req: Request, res: Response) => {
+  try {
+    const wsPath = requireWorkspace(res);
+    if (!wsPath) return;
+    const task = getTask(req.params.id, wsPath);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    if (findPendingQuestionsComment(getTaskComments(wsPath, req.params.id))) {
+      return res.status(400).json({ error: 'Questions already open on this task' });
+    }
+
+    const comments = getTaskComments(wsPath, req.params.id);
+    const agentComments = comments.filter(c => c.kind === 'comment' && c.author === 'agent');
+    const source = agentComments[agentComments.length - 1];
+    if (!source?.body) {
+      return res.status(404).json({ error: 'No agent message to extract questions from' });
+    }
+
+    const parsed = parseQuestionsFromAgentText(source.body);
+    if (!parsed?.length) {
+      return res.status(400).json({ error: 'Could not find numbered questions in the latest agent message' });
+    }
+
+    const qComment = addTaskComment(wsPath, req.params.id, {
+      author: 'agent',
+      authorName: 'Agent',
+      kind: 'questions',
+      body: 'Clarifying questions (extracted from agent message).',
+      questions: parsed,
+    });
+
+    if (broadcast) {
+      broadcast({ type: 'comment_append', taskId: req.params.id, comment: qComment });
+    }
+    res.json({ comment: qComment });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.post('/:id/questions/:commentId/answer', (req: Request, res: Response) => {
+  try {
+    const wsPath = requireWorkspace(res);
+    if (!wsPath) return;
+    const task = getTask(req.params.id, wsPath);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    const { answers } = req.body as { answers?: QuestionAnswers };
+    if (!answers || typeof answers !== 'object') {
+      return res.status(400).json({ error: 'answers object is required' });
+    }
+
+    const comments = getTaskComments(wsPath, req.params.id);
+    const qComment = comments.find(c => c.id === req.params.commentId);
+    if (!qComment || qComment.kind !== 'questions' || !qComment.questions?.length) {
+      return res.status(404).json({ error: 'Questions not found' });
+    }
+    if (qComment.answeredAt) {
+      return res.status(400).json({ error: 'Questions already answered' });
+    }
+
+    const answeredAt = new Date().toISOString();
+    updateTaskComment(wsPath, req.params.id, qComment.id, { answeredAt });
+
+    let prdUpdated = false;
+    if (task.prd) {
+      appendAnswersToPrd(wsPath, task.prd, qComment.questions, answers);
+      prdUpdated = true;
+    }
+
+    const answerBody = formatAnswersBody(qComment.questions, answers);
+    const userComment = addTaskComment(wsPath, req.params.id, {
+      author: 'user',
+      authorName: 'You',
+      kind: 'comment',
+      body: answerBody,
+    });
+
+    if (task.status === 'running') {
+      task.status = 'todo';
+    } else if (
+      task.status === 'awaiting_confirmation' ||
+      task.status === 'review' ||
+      task.status === 'done'
+    ) {
+      task.status = 'todo';
+    }
+    task.updatedAt = new Date().toISOString();
+    saveTask(task, wsPath);
+
+    if (broadcast) {
+      broadcast({
+        type: 'comment_append',
+        taskId: req.params.id,
+        comment: { ...qComment, answeredAt },
+      });
+      broadcast({ type: 'comment_append', taskId: req.params.id, comment: userComment });
+      broadcast({ type: 'task_update', task });
+    }
+
+    onTaskCommentAdded(req.params.id);
+    res.json({ ok: true, prdUpdated, prdPath: task.prd, userComment });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

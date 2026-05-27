@@ -111,7 +111,8 @@ function ralphLoopWorkflow(): WorkflowConfig {
     type: 'loop',
     max_iterations: 20,
     commit_on_story: true,
-    skills: ['ralph'],
+    /** Plan conversion uses the `ralph` skill manually / via Plan editor — not per story at run time */
+    skills: [],
     template: `You are working on story {{story.id}}: {{story.title}}.
 {{story.description}}
 

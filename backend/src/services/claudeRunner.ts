@@ -28,6 +28,8 @@ export interface RunOptions {
   workspacePath?: string;
   tools: string[];
   sessionId?: string;
+  /** Start a new session in the workspace (loads project skills). Do not --resume. */
+  freshSession?: boolean;
   onMessage: LineCallback;
   onDone: (sessionId: string) => void;
   onError: (err: string) => void;
@@ -47,7 +49,19 @@ export function stopActive(): void {
 }
 
 export function runClaude(opts: RunOptions): void {
-  const { taskId, prompt, model, soulPath, workspacePath, tools, sessionId, onMessage, onDone, onError } = opts;
+  const {
+    taskId,
+    prompt,
+    model,
+    soulPath,
+    workspacePath,
+    tools,
+    sessionId,
+    freshSession,
+    onMessage,
+    onDone,
+    onError,
+  } = opts;
 
   stopActive();
 
@@ -60,17 +74,22 @@ export function runClaude(opts: RunOptions): void {
   // Skip permission prompts (we're running headless)
   args.push('--dangerously-skip-permissions');
 
-  // Skip project .claude/settings.json hooks (sync-memory SessionEnd) but keep user OAuth login.
-  // --bare breaks auth ("Not logged in"); --setting-sources user avoids workspace hooks.
-  args.push('--setting-sources', 'user');
-
   const resolvedWorkspace = workspacePath ? expandHome(workspacePath) : null;
-  if (resolvedWorkspace && fs.existsSync(resolvedWorkspace)) {
-    args.push('--add-dir', resolvedWorkspace);
+  const hasWorkspace =
+    !!resolvedWorkspace && fs.existsSync(resolvedWorkspace);
+
+  // Workspace must be the session root so project .claude/skills (prd, ralph, …) resolve via Skill tool.
+  // user-only hid workspace skills ("Unknown skill: prd"). project loads .claude from cwd.
+  args.push('--setting-sources', hasWorkspace ? 'user,project' : 'user');
+
+  if (hasWorkspace) {
+    args.push('--add-dir', resolvedWorkspace!);
   }
 
-  if (sessionId) {
-    args.push('--resume', sessionId);
+  const resumeId = freshSession ? undefined : sessionId;
+
+  if (resumeId) {
+    args.push('--resume', resumeId);
   } else {
     if (model) args.push('--model', model);
 
@@ -83,7 +102,7 @@ export function runClaude(opts: RunOptions): void {
     }
   }
 
-  let capturedSessionId = sessionId || '';
+  let capturedSessionId = resumeId || '';
   let buffer = '';
   let lastOutput = '';
 

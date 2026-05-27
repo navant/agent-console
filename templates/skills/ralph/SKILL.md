@@ -9,9 +9,26 @@ Converts existing PRDs to the prd.json format that Ralph uses for autonomous exe
 
 ---
 
+## Two Ralph modes (do not mix paths)
+
+| Mode | Where `prd.json` lives | How it runs |
+|------|------------------------|-------------|
+| **Agent Console — `ralph-loop` workflow** | `<tasks>/<taskId>/prd.json` (default **`.claude/tasks/<taskId>/prd.json`**) | Kanban task → workflow **Ralph loop** → Run. Console runs one Claude story per iteration and updates `passes` in that file. |
+| **Shell loop (`ralph.sh`)** | **`scripts/ralph/prd.json`** (copied at workspace setup) | `./scripts/ralph/ralph.sh --tool claude 10` from repo root. Standalone snarktank/ralph loop. |
+
+**Check workspace Paths** (Settings → Paths): `tasks` must be `.claude/tasks` unless you intentionally use another folder. Task data should **not** land in a repo-root `tasks/` folder unless that path is configured.
+
+- Use this skill to **author or convert** a plan before Run (or paste into Plan editor).
+- Do **not** write kanban task plans only under `scripts/ralph/` when using **ralph-loop** on a task — the runner reads the **per-task** file above.
+- `ralph-cursor-continue` / `ralph-resume` target **`scripts/ralph/`** (shell mode). For in-app loops, use the task’s plan file and progress log under `.claude/tasks/<taskId>/`.
+
+---
+
 ## The Job
 
-Take a PRD (markdown file or text) and convert it to `prd.json` in your ralph directory.
+Take a PRD (markdown file or text) and convert it to `prd.json` at the correct path for the mode you are using (see table above).
+
+For **Agent Console** tasks: save to `.claude/tasks/<taskId>/prd.json` (or the workspace `tasks` path + task id). For **shell Ralph**: save to `scripts/ralph/prd.json`.
 
 ---
 

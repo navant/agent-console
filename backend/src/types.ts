@@ -127,7 +127,20 @@ export interface PlanConfig {
 }
 
 export type TaskCommentAuthor = 'user' | 'agent' | 'system';
-export type TaskCommentKind = 'comment' | 'activity';
+export type TaskCommentKind = 'comment' | 'activity' | 'questions';
+
+export interface AgentQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface AgentQuestion {
+  id: string;
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options?: AgentQuestionOption[];
+}
 
 export interface TaskComment {
   id: string;
@@ -135,6 +148,10 @@ export interface TaskComment {
   authorName?: string;
   body: string;
   kind: TaskCommentKind;
+  /** Structured questions when kind === 'questions' */
+  questions?: AgentQuestion[];
+  /** Set when the user submits answers */
+  answeredAt?: string;
   createdAt: string;
 }
 
@@ -189,6 +206,7 @@ export type WSServerMessage =
 
 export type WSClientMessage =
   | { type: 'run_task'; taskId: string; nudge?: boolean }
+  | { type: 'run_task_plan'; taskId: string; phase: 'write-prd' | 'convert-ralph' }
   | { type: 'auto_queue_start' }
   | { type: 'auto_queue_stop' }
   | { type: 'chat'; message: string; agentName: string; sessionId?: string; taskId?: string; bootstrapSkills?: boolean }

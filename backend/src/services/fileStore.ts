@@ -671,13 +671,14 @@ export function createTask(
   const taskNum = Date.now().toString(36).toUpperCase().slice(-4);
   const id = `T-${taskNum}`;
 
+  const isRalphLoop = resolved.workflow === 'ralph-loop';
   const task: TaskConfig = {
     id,
     title: data.title,
     agent: wfMerged.agent,
     workflow: resolved.workflow,
     status: 'todo',
-    type: 'simple',
+    type: isRalphLoop ? 'project' : 'simple',
     skills: wfMerged.skills,
     ...(wfMerged.taskType ? { taskType: wfMerged.taskType } : {}),
     ...(data.prd ? { prd: data.prd } : {}),
@@ -697,6 +698,9 @@ export function createTask(
   }
 
   writeFile(path.join(dir, 'progress.txt'), `# Progress — ${data.title}\n\n`);
+  if (isRalphLoop) {
+    writeFile(path.join(dir, 'prd.json'), JSON.stringify({ userStories: [] } as PlanConfig, null, 2));
+  }
   writeTaskMarkdown(task, workspacePath);
   return task;
 }

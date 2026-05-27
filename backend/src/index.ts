@@ -22,7 +22,8 @@ import {
   buildSkillInvocationPrompt,
   ensureSkillToolAllowed,
 } from './services/fileStore';
-import { executeTask, stopTaskRunner } from './services/taskRunner';
+import { executeTask, stopTaskRunner, isTaskRunnerBusy } from './services/taskRunner';
+import { executeTaskPlanPhase } from './services/taskPlanPhase';
 import {
   setTaskQueueCallbacks,
   setAutoQueue,
@@ -119,6 +120,19 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
         executeTask(msg.taskId, activeWs.path, { nudge: !!msg.nudge, source: 'manual' }, runCallbacks)
+          .then(() => void tick())
+          .catch(() => {});
+      } else if (msg.type === 'run_task_plan') {
+        const activeWs = getActiveWorkspace();
+        if (!activeWs) {
+          sendTo(ws, { type: 'error', message: 'No active workspace' });
+          return;
+        }
+        if (isTaskRunnerBusy()) {
+          sendTo(ws, { type: 'error', message: 'Another task is already running' });
+          return;
+        }
+        executeTaskPlanPhase(msg.taskId, activeWs.path, msg.phase, runCallbacks)
           .then(() => void tick())
           .catch(() => {});
       } else if (msg.type === 'auto_queue_start') {
